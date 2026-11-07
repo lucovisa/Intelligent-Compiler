@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ic-core", "crates/ic-render", "crates/ic-lua", "crates/ic-cli"]
+members = ["crates/ic-core", "crates/ic-render", "crates/ic-lua", "crates/ic-build", "crates/ic-cli", "crates/ic-studio"]
 
 [workspace.package]
 version = "0.1.0"

@@ -10,40 +10,25 @@ use std::{
 const ZIG_VERSION: &str = "0.13.0";
 
 fn exe(name: &str) -> String {
-    if cfg!(windows) {
-        format!("{name}.exe")
-    } else {
-        name.to_string()
-    }
+    if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
 }
 
 fn absolute(p: &Path) -> Result<PathBuf, String> {
     if p.is_absolute() {
         Ok(p.to_path_buf())
     } else {
-        env::current_dir()
-            .map(|c| c.join(p))
-            .map_err(|e| e.to_string())
+        env::current_dir().map(|c| c.join(p)).map_err(|e| e.to_string())
     }
 }
 
 fn run_ok(cmd: &mut Command, what: &str) -> Result<(), String> {
-    let status = cmd
-        .status()
-        .map_err(|e| format!("{what}: не удалось запустить ({e})"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("{what}: ошибка ({status})"))
-    }
+    let status = cmd.status().map_err(|e| format!("{what}: не удалось запустить ({e})"))?;
+    if status.success() { Ok(()) } else { Err(format!("{what}: ошибка ({status})")) }
 }
 
 fn download(url: &str, to: &Path) -> Result<(), String> {
     run_ok(
-        Command::new("curl")
-            .args(["-fL", "--proto", "=https", "--tlsv1.2", "-o"])
-            .arg(to)
-            .arg(url),
+        Command::new("curl").args(["-fL", "--proto", "=https", "--tlsv1.2", "-o"]).arg(to).arg(url),
         &format!("скачивание {url}"),
     )
 }
@@ -55,18 +40,8 @@ fn setup_zig(ic: &Path) -> Result<(), String> {
         let archive = ic.join("zig.zip");
         let name = format!("zig-windows-x86_64-{ZIG_VERSION}");
         println!("Скачиваю Zig (линкер) в {} ...", zig_dir.display());
-        download(
-            &format!("https://ziglang.org/download/{ZIG_VERSION}/{name}.zip"),
-            &archive,
-        )?;
-        run_ok(
-            Command::new("tar")
-                .arg("-xf")
-                .arg(&archive)
-                .arg("-C")
-                .arg(ic),
-            "распаковка Zig",
-        )?;
+        download(&format!("https://ziglang.org/download/{ZIG_VERSION}/{name}.zip"), &archive)?;
+        run_ok(Command::new("tar").arg("-xf").arg(&archive).arg("-C").arg(ic), "распаковка Zig")?;
         fs::rename(ic.join(&name), &zig_dir).map_err(|e| e.to_string())?;
         let _ = fs::remove_file(&archive);
     }
@@ -92,14 +67,7 @@ pub fn setup(project: &Path) -> Result<(), String> {
         println!("Rust уже установлен в {}", ic.display());
     } else {
         println!("Скачиваю Rust (официальный rustup) в {} ...", ic.display());
-        let args = [
-            "-y",
-            "--no-modify-path",
-            "--profile",
-            "minimal",
-            "--default-toolchain",
-            "stable",
-        ];
+        let args = ["-y", "--no-modify-path", "--profile", "minimal", "--default-toolchain", "stable"];
         if cfg!(windows) {
             let init = ic.join("rustup-init.exe");
             download("https://win.rustup.rs/x86_64", &init)?;
