@@ -69,8 +69,9 @@ fn register_api(lua: &Lua, shared: &Rc<RefCell<Shared>>) -> mlua::Result<()> {
     ic.set(
         "key_down",
         lua.create_function(move |_, name: String| {
-            let k = parse_key(&name)
-                .ok_or_else(|| mlua::Error::RuntimeError(format!("неизвестная клавиша '{name}'")))?;
+            let k = parse_key(&name).ok_or_else(|| {
+                mlua::Error::RuntimeError(format!("неизвестная клавиша '{name}'"))
+            })?;
             Ok(sh.borrow().down[k as usize])
         })?,
     )?;
@@ -79,17 +80,24 @@ fn register_api(lua: &Lua, shared: &Rc<RefCell<Shared>>) -> mlua::Result<()> {
     ic.set(
         "key_pressed",
         lua.create_function(move |_, name: String| {
-            let k = parse_key(&name)
-                .ok_or_else(|| mlua::Error::RuntimeError(format!("неизвестная клавиша '{name}'")))?;
+            let k = parse_key(&name).ok_or_else(|| {
+                mlua::Error::RuntimeError(format!("неизвестная клавиша '{name}'"))
+            })?;
             Ok(sh.borrow().pressed[k as usize])
         })?,
     )?;
 
     let sh = shared.clone();
-    ic.set("screen", lua.create_function(move |_, ()| Ok(sh.borrow().screen))?)?;
+    ic.set(
+        "screen",
+        lua.create_function(move |_, ()| Ok(sh.borrow().screen))?,
+    )?;
 
     let sh = shared.clone();
-    ic.set("time", lua.create_function(move |_, ()| Ok(sh.borrow().elapsed))?)?;
+    ic.set(
+        "time",
+        lua.create_function(move |_, ()| Ok(sh.borrow().elapsed))?,
+    )?;
 
     let sh = shared.clone();
     ic.set(
@@ -141,13 +149,29 @@ impl LuaGame {
             .unwrap_or_else(|| Path::new("."));
         let package: Table = lua.globals().get("package").map_err(|e| e.to_string())?;
         package
-            .set("path", format!("{d}/?.lua;{d}/?/init.lua", d = dir.display()))
+            .set(
+                "path",
+                format!("{d}/?.lua;{d}/?/init.lua", d = dir.display()),
+            )
             .map_err(|e| e.to_string())?;
 
-        let name = format!("@{}", script.file_name().and_then(|s| s.to_str()).unwrap_or("main.lua"));
-        lua.load(src.as_str()).set_name(name).exec().map_err(|e| e.to_string())?;
+        let name = format!(
+            "@{}",
+            script
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("main.lua")
+        );
+        lua.load(src.as_str())
+            .set_name(name)
+            .exec()
+            .map_err(|e| e.to_string())?;
 
-        Ok(Self { lua, shared, dead: false })
+        Ok(Self {
+            lua,
+            shared,
+            dead: false,
+        })
     }
 
     /// Заголовок окна из `ic.title`.
@@ -187,8 +211,12 @@ impl LuaGame {
         if self.dead {
             return;
         }
-        let Ok(ic) = self.lua.globals().get::<Table>("ic") else { return };
-        let Ok(f) = ic.get::<Function>(name) else { return };
+        let Ok(ic) = self.lua.globals().get::<Table>("ic") else {
+            return;
+        };
+        let Ok(f) = ic.get::<Function>(name) else {
+            return;
+        };
 
         self.sync_in(ctx);
         let res = match dt {

@@ -104,7 +104,9 @@ fn init_lua(dir: &Path) {
 
 fn init_rust(dir: &Path) {
     let raw = if dir == Path::new(".") {
-        env::current_dir().ok().and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+        env::current_dir()
+            .ok()
+            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
     } else {
         dir.file_name().map(|n| n.to_string_lossy().into_owned())
     };
@@ -138,7 +140,8 @@ fn setup_menu() {
     match ask("Выбор [1]: ").as_str() {
         "2" => {
             init_rust(Path::new("."));
-            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y") {
+            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y")
+            {
                 or_die(rust_mode::setup(Path::new(".")));
             } else {
                 println!("Позже: ic rust setup");
@@ -179,7 +182,10 @@ fn find_default() -> Option<PathBuf> {
 
 fn start(script: PathBuf) {
     // рабочая папка = папка игры, чтобы относительные пути (assets/…) работали
-    let file = script.file_name().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("main.lua"));
+    let file = script
+        .file_name()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("main.lua"));
     if let Some(dir) = script.parent().filter(|d| !d.as_os_str().is_empty()) {
         if let Err(e) = env::set_current_dir(dir) {
             die(&format!("не могу открыть папку игры: {e}"));
@@ -187,7 +193,13 @@ fn start(script: PathBuf) {
     }
     let game = or_die(LuaGame::new(&file));
     let title: &'static str = Box::leak(game.title().into_boxed_str());
-    run(game, Config { title, ..Default::default() });
+    run(
+        game,
+        Config {
+            title,
+            ..Default::default()
+        },
+    );
 }
 
 fn main() {
