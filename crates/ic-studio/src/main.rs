@@ -33,7 +33,11 @@ fn ic_path() -> Option<PathBuf> {
 /// Относительные пути считаются от папки Studio, а не от того места, откуда её запустили.
 fn resolve_dir(input: &str) -> PathBuf {
     let p = PathBuf::from(input.trim());
-    if p.is_absolute() { p } else { exe_dir().unwrap_or_default().join(p) }
+    if p.is_absolute() {
+        p
+    } else {
+        exe_dir().unwrap_or_default().join(p)
+    }
 }
 
 /// Кэши шейдеров драйверов (Mesa / NVIDIA) по умолчанию лежат в ~/.cache — переносим рядом.
@@ -50,7 +54,10 @@ fn confine_caches() {
         set("__GL_SHADER_DISK_CACHE_PATH", cache.as_os_str());
         // потолок размера кэша: драйвер сам вытесняет старое
         set("MESA_SHADER_CACHE_MAX_SIZE", std::ffi::OsStr::new("256M"));
-        set("__GL_SHADER_DISK_CACHE_SIZE", std::ffi::OsStr::new("268435456"));
+        set(
+            "__GL_SHADER_DISK_CACHE_SIZE",
+            std::ffi::OsStr::new("268435456"),
+        );
     }
 }
 
@@ -80,12 +87,22 @@ impl Settings {
     }
 
     fn system_lang() -> Lang {
-        let v = env::var("LC_ALL").or_else(|_| env::var("LANG")).unwrap_or_default();
-        if v.starts_with("ru") { Lang::Ru } else { Lang::En }
+        let v = env::var("LC_ALL")
+            .or_else(|_| env::var("LANG"))
+            .unwrap_or_default();
+        if v.starts_with("ru") {
+            Lang::Ru
+        } else {
+            Lang::En
+        }
     }
 
     fn load() -> Self {
-        let mut s = Settings { dark: true, lang: Self::system_lang(), recent: Vec::new() };
+        let mut s = Settings {
+            dark: true,
+            lang: Self::system_lang(),
+            recent: Vec::new(),
+        };
         if let Ok(text) = fs::read_to_string(Self::path()) {
             for line in text.lines() {
                 if let Some((k, v)) = line.split_once('=') {
@@ -162,18 +179,37 @@ fn setup_style(ctx: &egui::Context, dark: bool) {
     let mut style = (*ctx.style()).clone();
 
     style.text_styles = [
-        (egui::TextStyle::Heading, FontId::new(22.0, egui::FontFamily::Proportional)),
-        (egui::TextStyle::Body, FontId::new(15.0, egui::FontFamily::Proportional)),
-        (egui::TextStyle::Button, FontId::new(15.0, egui::FontFamily::Proportional)),
-        (egui::TextStyle::Small, FontId::new(12.0, egui::FontFamily::Proportional)),
-        (egui::TextStyle::Monospace, FontId::new(14.0, egui::FontFamily::Monospace)),
+        (
+            egui::TextStyle::Heading,
+            FontId::new(22.0, egui::FontFamily::Proportional),
+        ),
+        (
+            egui::TextStyle::Body,
+            FontId::new(15.0, egui::FontFamily::Proportional),
+        ),
+        (
+            egui::TextStyle::Button,
+            FontId::new(15.0, egui::FontFamily::Proportional),
+        ),
+        (
+            egui::TextStyle::Small,
+            FontId::new(12.0, egui::FontFamily::Proportional),
+        ),
+        (
+            egui::TextStyle::Monospace,
+            FontId::new(14.0, egui::FontFamily::Monospace),
+        ),
     ]
     .into();
     style.spacing.item_spacing = egui::vec2(8.0, 6.0);
     style.spacing.button_padding = egui::vec2(12.0, 5.0);
     style.spacing.interact_size.y = 28.0;
 
-    let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let mut v = if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
     v.panel_fill = p.panel;
     v.window_fill = p.panel;
     v.extreme_bg_color = p.editor;
@@ -208,7 +244,10 @@ fn button_on(ui: &mut egui::Ui, on: bool, text: &str) -> egui::Response {
 
 fn primary_on(ui: &mut egui::Ui, on: bool, text: &str) -> egui::Response {
     let accent = palette(ui.visuals().dark_mode).accent;
-    ui.add_enabled(on, egui::Button::new(RichText::new(text).color(Color32::WHITE)).fill(accent))
+    ui.add_enabled(
+        on,
+        egui::Button::new(RichText::new(text).color(Color32::WHITE)).fill(accent),
+    )
 }
 
 fn button(ui: &mut egui::Ui, text: &str) -> egui::Response {
@@ -224,7 +263,9 @@ fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 
 fn theme_toggle(ui: &mut egui::Ui, dark: &mut bool, tip: &str) -> bool {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 28.0), egui::Sense::click());
-    let resp = resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let resp = resp
+        .on_hover_text(tip)
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
     let t = ui.ctx().animate_bool_with_time(resp.id, *dark, 0.25);
 
     let v = ui.style().interact(&resp).clone();
@@ -267,31 +308,62 @@ fn theme_toggle(ui: &mut egui::Ui, dark: &mut bool, tip: &str) -> bool {
 // ───────────────────────── #редактор ─────────────────────────
 
 const LUA_KEYWORDS: [&str; 22] = [
-    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil",
-    "not", "or", "repeat", "return", "then", "true", "until", "while",
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
+    "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
 ];
 
 /// Простая подсветка Lua: комментарии, строки, числа, ключевые слова, `ic`.
 fn highlight(src: &str, font: FontId, dark: bool, lua: bool) -> egui::text::LayoutJob {
     let rgb = Color32::from_rgb;
     let (kw, st, cm, nm, bi, tx) = if dark {
-        (rgb(0xC5, 0x86, 0xC0), rgb(0xCE, 0x91, 0x78), rgb(0x6A, 0x99, 0x55), rgb(0xB5, 0xCE, 0xA8), rgb(0x4F, 0xC1, 0xFF), rgb(0xD4, 0xD4, 0xD4))
+        (
+            rgb(0xC5, 0x86, 0xC0),
+            rgb(0xCE, 0x91, 0x78),
+            rgb(0x6A, 0x99, 0x55),
+            rgb(0xB5, 0xCE, 0xA8),
+            rgb(0x4F, 0xC1, 0xFF),
+            rgb(0xD4, 0xD4, 0xD4),
+        )
     } else {
-        (rgb(0xAF, 0x00, 0xDB), rgb(0xA3, 0x15, 0x15), rgb(0x00, 0x80, 0x00), rgb(0x09, 0x86, 0x58), rgb(0x00, 0x70, 0xC1), rgb(0x1F, 0x1F, 0x1F))
+        (
+            rgb(0xAF, 0x00, 0xDB),
+            rgb(0xA3, 0x15, 0x15),
+            rgb(0x00, 0x80, 0x00),
+            rgb(0x09, 0x86, 0x58),
+            rgb(0x00, 0x70, 0xC1),
+            rgb(0x1F, 0x1F, 0x1F),
+        )
     };
 
     let mut job = egui::text::LayoutJob::default();
     if !lua {
         // не Lua (например ic.toml) — без подсветки
-        job.append(src, 0.0, egui::text::TextFormat { font_id: font, color: tx, ..Default::default() });
+        job.append(
+            src,
+            0.0,
+            egui::text::TextFormat {
+                font_id: font,
+                color: tx,
+                ..Default::default()
+            },
+        );
         return job;
     }
     let mut push = |s: &str, color: Color32| {
         if !s.is_empty() {
-            job.append(s, 0.0, egui::text::TextFormat { font_id: font.clone(), color, ..Default::default() });
+            job.append(
+                s,
+                0.0,
+                egui::text::TextFormat {
+                    font_id: font.clone(),
+                    color,
+                    ..Default::default()
+                },
+            );
         }
     };
-    let special = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'"' || c == b'\'' || c == b'-';
+    let special =
+        |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'"' || c == b'\'' || c == b'-';
 
     let b = src.as_bytes();
     let mut i = 0;
@@ -362,7 +434,12 @@ fn scan(dir: &Path, depth: usize, out: &mut Vec<FileEntry>) {
     }
     let Ok(rd) = fs::read_dir(dir) else { return };
     let mut items: Vec<_> = rd.filter_map(Result::ok).collect();
-    items.sort_by_key(|e| (!e.path().is_dir(), e.file_name().to_string_lossy().to_lowercase()));
+    items.sort_by_key(|e| {
+        (
+            !e.path().is_dir(),
+            e.file_name().to_string_lossy().to_lowercase(),
+        )
+    });
     for e in items {
         let name = e.file_name().to_string_lossy().into_owned();
         if name.starts_with('.') || ["build", "target", "cache"].contains(&name.as_str()) {
@@ -370,7 +447,12 @@ fn scan(dir: &Path, depth: usize, out: &mut Vec<FileEntry>) {
         }
         let path = e.path();
         let is_dir = path.is_dir();
-        out.push(FileEntry { path: path.clone(), name, depth, is_dir });
+        out.push(FileEntry {
+            path: path.clone(),
+            name,
+            depth,
+            is_dir,
+        });
         if is_dir {
             scan(&path, depth + 1, out);
         }
@@ -379,7 +461,9 @@ fn scan(dir: &Path, depth: usize, out: &mut Vec<FileEntry>) {
 
 /// Проекты (папки с main.lua) внутри папки `dir`.
 fn scan_projects(dir: &Path) -> Vec<String> {
-    let Ok(rd) = fs::read_dir(dir) else { return Vec::new() };
+    let Ok(rd) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut v: Vec<String> = rd
         .filter_map(Result::ok)
         .filter(|e| e.path().join("main.lua").is_file())
@@ -413,7 +497,11 @@ fn load_file(proj: &mut Project, path: PathBuf, lang: Lang) {
 
 // ───────────────────────── #запуск ─────────────────────────
 
-fn pump<R: Read + Send + 'static>(r: Option<R>, tx: Sender<String>, ctx: egui::Context) -> Option<JoinHandle<()>> {
+fn pump<R: Read + Send + 'static>(
+    r: Option<R>,
+    tx: Sender<String>,
+    ctx: egui::Context,
+) -> Option<JoinHandle<()>> {
     r.map(|r| {
         thread::spawn(move || {
             for line in BufReader::new(r).lines().map_while(Result::ok) {
@@ -465,8 +553,24 @@ impl Studio {
         let settings = Settings::load();
         setup_style(&cc.egui_ctx, settings.dark);
         let (tx, rx) = channel();
-        let location = exe_dir().unwrap_or_default().join("projects").to_string_lossy().into_owned();
-        Self { settings, name: "my_game".into(), location, start_error: None, project: None, found: Vec::new(), found_for: String::new(), settings_draft: None, log: Vec::new(), tx, rx }
+        let location = exe_dir()
+            .unwrap_or_default()
+            .join("projects")
+            .to_string_lossy()
+            .into_owned();
+        Self {
+            settings,
+            name: "my_game".into(),
+            location,
+            start_error: None,
+            project: None,
+            found: Vec::new(),
+            found_for: String::new(),
+            settings_draft: None,
+            log: Vec::new(),
+            tx,
+            rx,
+        }
     }
 
     // #создание проекта — делегируем `ic new`, чтобы шаблон был один на всех
@@ -483,7 +587,10 @@ impl Studio {
             return;
         };
         let mut cmd = Command::new(ic);
-        cmd.arg("new").arg(&dir).current_dir(exe_dir().unwrap_or_default()).stdin(Stdio::null());
+        cmd.arg("new")
+            .arg(&dir)
+            .current_dir(exe_dir().unwrap_or_default())
+            .stdin(Stdio::null());
         hide_console(&mut cmd);
         match cmd.output() {
             Ok(o) if o.status.success() => self.open_project(dir),
@@ -503,8 +610,19 @@ impl Studio {
         }
         let mut files = Vec::new();
         scan(&dir, 0, &mut files);
-        let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "project".into());
-        let mut proj = Project { dir: dir.clone(), name, files, open: None, text: String::new(), dirty: false, note: None };
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "project".into());
+        let mut proj = Project {
+            dir: dir.clone(),
+            name,
+            files,
+            open: None,
+            text: String::new(),
+            dirty: false,
+            note: None,
+        };
         load_file(&mut proj, dir.join("main.lua"), lang);
         self.project = Some(proj);
         self.start_error = None;
@@ -521,7 +639,9 @@ impl Studio {
     }
 
     fn save(&mut self) {
-        let Some(p) = self.project.as_mut() else { return };
+        let Some(p) = self.project.as_mut() else {
+            return;
+        };
         if !p.dirty {
             return;
         }
@@ -534,13 +654,16 @@ impl Studio {
     }
 
     fn project_dir(&self) -> Option<String> {
-        self.project.as_ref().map(|p| p.dir.to_string_lossy().into_owned())
+        self.project
+            .as_ref()
+            .map(|p| p.dir.to_string_lossy().into_owned())
     }
 
     /// Запускает `ic <args>` и стримит вывод в журнал.
     fn run_ic(&mut self, ctx: &egui::Context, args: Vec<String>) {
         let Some(ic) = ic_path() else {
-            self.log.push(tr(self.settings.lang, K::IcMissing).to_string());
+            self.log
+                .push(tr(self.settings.lang, K::IcMissing).to_string());
             return;
         };
         self.log.push(format!("> ic {}", args.join(" ")));
@@ -549,7 +672,11 @@ impl Studio {
         let cwd = exe_dir().unwrap_or_default();
         thread::spawn(move || {
             let mut cmd = Command::new(ic);
-            cmd.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            cmd.args(args)
+                .current_dir(cwd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
             hide_console(&mut cmd);
             match cmd.spawn() {
                 Err(e) => {
@@ -602,39 +729,41 @@ impl Studio {
             Action::OpenFile(p) => self.open_file(p),
             Action::ClearLog => self.log.clear(),
             Action::Check => {
-    self.save();
-    if let Some(dir) = self.project_dir() {
-        self.run_ic(ctx, vec!["check".into(), dir]);
-    }
-}
-// #настройки проекта — ic.toml
-Action::OpenSettings => {
-    if let Some(dir) = self.project.as_ref().map(|p| p.dir.clone()) {
-        self.settings_draft = Some(ProjectSettings::load(&dir).0);
-    }
-}
-Action::SaveSettings => {
-    let lang = self.settings.lang;
-    if let (Some(draft), Some(proj)) = (self.settings_draft.take(), self.project.as_mut()) {
-        match draft.save(&proj.dir) {
-            Ok(()) => {
-                self.log.push(tr(lang, K::SettingsSaved).to_string());
-                proj.files.clear();
-                scan(&proj.dir, 0, &mut proj.files);
-                let toml = proj.dir.join(ProjectSettings::FILE);
-                if proj.open.as_ref() == Some(&toml) && !proj.dirty {
-                    load_file(proj, toml, lang);
+                self.save();
+                if let Some(dir) = self.project_dir() {
+                    self.run_ic(ctx, vec!["check".into(), dir]);
                 }
             }
-            Err(e) => {
-                self.log.push(e);
-                self.settings_draft = Some(draft);
+            // #настройки проекта — ic.toml
+            Action::OpenSettings => {
+                if let Some(dir) = self.project.as_ref().map(|p| p.dir.clone()) {
+                    self.settings_draft = Some(ProjectSettings::load(&dir).0);
+                }
             }
-        }
-    }
-}
-Action::CloseSettings => self.settings_draft = None,
-Action::PickProject(n) => self.name = n,
+            Action::SaveSettings => {
+                let lang = self.settings.lang;
+                if let (Some(draft), Some(proj)) =
+                    (self.settings_draft.take(), self.project.as_mut())
+                {
+                    match draft.save(&proj.dir) {
+                        Ok(()) => {
+                            self.log.push(tr(lang, K::SettingsSaved).to_string());
+                            proj.files.clear();
+                            scan(&proj.dir, 0, &mut proj.files);
+                            let toml = proj.dir.join(ProjectSettings::FILE);
+                            if proj.open.as_ref() == Some(&toml) && !proj.dirty {
+                                load_file(proj, toml, lang);
+                            }
+                        }
+                        Err(e) => {
+                            self.log.push(e);
+                            self.settings_draft = Some(draft);
+                        }
+                    }
+                }
+            }
+            Action::CloseSettings => self.settings_draft = None,
+            Action::PickProject(n) => self.name = n,
         }
     }
 }
@@ -656,26 +785,46 @@ impl eframe::App for Studio {
         let lang = self.settings.lang;
         let dark = self.settings.dark;
         let p = palette(dark);
-        let theme_tip = format!("{}: {}", tr(lang, K::Theme), tr(lang, if dark { K::Light } else { K::Dark }));
+        let theme_tip = format!(
+            "{}: {}",
+            tr(lang, K::Theme),
+            tr(lang, if dark { K::Light } else { K::Dark })
+        );
 
         // #шапка
         egui::TopBottomPanel::top("top")
-            .frame(egui::Frame::none().fill(p.panel).inner_margin(Margin::symmetric(12.0, 8.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(p.panel)
+                    .inner_margin(Margin::symmetric(12.0, 8.0)),
+            )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     if let Some(proj) = &self.project {
                         ui.label(RichText::new(proj.name.as_str()).weak());
                         ui.add_space(10.0);
-                        if button(ui, tr(lang, K::Save)).on_hover_text("Ctrl+S").clicked() {
+                        if button(ui, tr(lang, K::Save))
+                            .on_hover_text("Ctrl+S")
+                            .clicked()
+                        {
                             action = Some(Action::Save);
                         }
-                        if primary_button(ui, tr(lang, K::Run)).on_hover_text("F5").clicked() {
+                        if primary_button(ui, tr(lang, K::Run))
+                            .on_hover_text("F5")
+                            .clicked()
+                        {
                             action = Some(Action::Run);
                         }
-                        if button(ui, tr(lang, K::Check)).on_hover_text(tr(lang, K::CheckHint)).clicked() {
+                        if button(ui, tr(lang, K::Check))
+                            .on_hover_text(tr(lang, K::CheckHint))
+                            .clicked()
+                        {
                             action = Some(Action::Check);
                         }
-                        if button(ui, tr(lang, K::Build)).on_hover_text(tr(lang, K::BuildHint)).clicked() {
+                        if button(ui, tr(lang, K::Build))
+                            .on_hover_text(tr(lang, K::BuildHint))
+                            .clicked()
+                        {
                             action = Some(Action::Build);
                         }
                         if button(ui, tr(lang, K::ProjSettings)).clicked() {
@@ -690,13 +839,18 @@ impl eframe::App for Studio {
                         if theme_toggle(ui, &mut self.settings.dark, &theme_tip) {
                             changed = true;
                         }
-                        egui::ComboBox::from_id_source("lang").selected_text(lang.label()).show_ui(ui, |ui| {
-                            for l in Lang::ALL {
-                                if ui.selectable_value(&mut self.settings.lang, l, l.label()).clicked() {
-                                    changed = true;
+                        egui::ComboBox::from_id_source("lang")
+                            .selected_text(lang.label())
+                            .show_ui(ui, |ui| {
+                                for l in Lang::ALL {
+                                    if ui
+                                        .selectable_value(&mut self.settings.lang, l, l.label())
+                                        .clicked()
+                                    {
+                                        changed = true;
+                                    }
                                 }
-                            }
-                        });
+                            });
                         ui.label(RichText::new(tr(lang, K::Language)).weak());
                     });
                 });
@@ -726,7 +880,11 @@ impl eframe::App for Studio {
                 .resizable(true)
                 .default_height(150.0)
                 .min_height(60.0)
-                .frame(egui::Frame::none().fill(p.panel).inner_margin(Margin::symmetric(12.0, 8.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(p.panel)
+                        .inner_margin(Margin::symmetric(12.0, 8.0)),
+                )
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(tr(lang, K::Log)).small().weak());
@@ -736,44 +894,60 @@ impl eframe::App for Studio {
                             }
                         });
                     });
-                    egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                        for line in &self.log {
-                            ui.monospace(line);
-                        }
-                    });
+                    egui::ScrollArea::vertical()
+                        .stick_to_bottom(true)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            for line in &self.log {
+                                ui.monospace(line);
+                            }
+                        });
                 });
 
             // #файлы — боковая панель
             egui::SidePanel::left("files")
                 .resizable(true)
                 .default_width(190.0)
-                .frame(egui::Frame::none().fill(p.panel).inner_margin(Margin::symmetric(10.0, 8.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(p.panel)
+                        .inner_margin(Margin::symmetric(10.0, 8.0)),
+                )
                 .show(ctx, |ui| {
                     ui.label(RichText::new(tr(lang, K::Files)).small().weak());
-                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                        if let Some(proj) = &self.project {
-                            for f in &proj.files {
-                                ui.horizontal(|ui| {
-                                    ui.add_space(f.depth as f32 * 12.0);
-                                    if f.is_dir {
-                                        ui.label(RichText::new(format!("{}/", f.name)).weak());
-                                    } else {
-                                        let sel = proj.open.as_deref() == Some(f.path.as_path());
-                                        if ui.selectable_label(sel, f.name.as_str()).clicked() {
-                                            action = Some(Action::OpenFile(f.path.clone()));
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if let Some(proj) = &self.project {
+                                for f in &proj.files {
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(f.depth as f32 * 12.0);
+                                        if f.is_dir {
+                                            ui.label(RichText::new(format!("{}/", f.name)).weak());
+                                        } else {
+                                            let sel =
+                                                proj.open.as_deref() == Some(f.path.as_path());
+                                            if ui.selectable_label(sel, f.name.as_str()).clicked() {
+                                                action = Some(Action::OpenFile(f.path.clone()));
+                                            }
                                         }
-                                    }
-                                });
+                                    });
+                                }
                             }
-                        }
-                    });
+                        });
                 });
 
             // #редактор — код файла с номерами строк и подсветкой
             egui::CentralPanel::default()
-                .frame(egui::Frame::none().fill(p.editor).inner_margin(Margin::same(10.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(p.editor)
+                        .inner_margin(Margin::same(10.0)),
+                )
                 .show(ctx, |ui| {
-                    let Some(proj) = self.project.as_mut() else { return };
+                    let Some(proj) = self.project.as_mut() else {
+                        return;
+                    };
                     ui.horizontal(|ui| {
                         let title = proj
                             .open
@@ -784,7 +958,8 @@ impl eframe::App for Studio {
                         ui.label(RichText::new(title).weak());
                         if proj.dirty {
                             ui.label(
-                                RichText::new(format!("● {}", tr(lang, K::Unsaved))).color(Color32::from_rgb(0xE5, 0xA0, 0x3B)),
+                                RichText::new(format!("● {}", tr(lang, K::Unsaved)))
+                                    .color(Color32::from_rgb(0xE5, 0xA0, 0x3B)),
                             );
                         }
                     });
@@ -796,11 +971,18 @@ impl eframe::App for Studio {
                     }
 
                     let font = egui::TextStyle::Monospace.resolve(ui.style());
-                    let is_lua = proj.open.as_ref().and_then(|p| p.extension()).is_some_and(|e| e == "lua");
+                    let is_lua = proj
+                        .open
+                        .as_ref()
+                        .and_then(|p| p.extension())
+                        .is_some_and(|e| e == "lua");
                     let weak = ui.visuals().weak_text_color();
                     let lines = proj.text.split('\n').count().max(1);
                     let width = lines.to_string().len();
-                    let nums = (1..=lines).map(|i| format!("{i:>width$}")).collect::<Vec<_>>().join("\n");
+                    let nums = (1..=lines)
+                        .map(|i| format!("{i:>width$}"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
 
                     let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
                         let mut job = highlight(text, font.clone(), dark, is_lua);
@@ -808,24 +990,26 @@ impl eframe::App for Studio {
                         ui.fonts(|f| f.layout_job(job))
                     };
 
-                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                        ui.horizontal_top(|ui| {
-                            ui.vertical(|ui| {
-                                ui.add_space(2.0);
-                                ui.label(RichText::new(nums).monospace().color(weak));
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.horizontal_top(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.add_space(2.0);
+                                    ui.label(RichText::new(nums).monospace().color(weak));
+                                });
+                                let resp = ui.add(
+                                    egui::TextEdit::multiline(&mut proj.text)
+                                        .code_editor()
+                                        .desired_width(f32::INFINITY)
+                                        .frame(false)
+                                        .layouter(&mut layouter),
+                                );
+                                if resp.changed() {
+                                    proj.dirty = true;
+                                }
                             });
-                            let resp = ui.add(
-                                egui::TextEdit::multiline(&mut proj.text)
-                                    .code_editor()
-                                    .desired_width(f32::INFINITY)
-                                    .frame(false)
-                                    .layouter(&mut layouter),
-                            );
-                            if resp.changed() {
-                                proj.dirty = true;
-                            }
                         });
-                    });
                 });
         } else {
             // #старт — сначала спрашиваем название и папку
@@ -833,126 +1017,180 @@ impl eframe::App for Studio {
                 let n = self.name.trim();
                 !n.is_empty() && !n.contains(['/', '\\'])
             };
-            let exists = name_ok && resolve_dir(&self.location).join(self.name.trim()).join("main.lua").is_file();
+            let exists = name_ok
+                && resolve_dir(&self.location)
+                    .join(self.name.trim())
+                    .join("main.lua")
+                    .is_file();
             if self.location != self.found_for {
                 self.found = scan_projects(&resolve_dir(&self.location));
                 self.found_for = self.location.clone();
             }
 
             egui::CentralPanel::default()
-                .frame(egui::Frame::none().fill(p.editor).inner_margin(Margin::same(24.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(p.editor)
+                        .inner_margin(Margin::same(24.0)),
+                )
                 .show(ctx, |ui| {
                     let top = (ui.available_height() * 0.12).min(90.0);
                     ui.vertical_centered(|ui| {
                         ui.add_space(top);
-                        ui.allocate_ui_with_layout(egui::vec2(480.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                            ui.heading(tr(lang, K::StartTitle));
-                            ui.label(RichText::new(tr(lang, K::StartSub)).weak());
-                            ui.add_space(10.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(480.0, 0.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.heading(tr(lang, K::StartTitle));
+                                ui.label(RichText::new(tr(lang, K::StartSub)).weak());
+                                ui.add_space(10.0);
 
-                            ui.label(tr(lang, K::ProjectName));
-                            let r = ui.add(egui::TextEdit::singleline(&mut self.name).desired_width(f32::INFINITY));
-                            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && name_ok && !exists {
-                                action = Some(Action::Create);
-                            }
-
-                            ui.label(tr(lang, K::Location));
-                            ui.add(egui::TextEdit::singleline(&mut self.location).desired_width(f32::INFINITY));
-                            let full = resolve_dir(&self.location).join(self.name.trim());
-                            ui.label(RichText::new(format!("→ {}", full.display())).small().weak());
-
-                            if exists {
-                                ui.colored_label(Color32::from_rgb(0x4E, 0xC9, 0x7B), tr(lang, K::FoundProject));
-                            } else if name_ok {
-                                ui.label(RichText::new(tr(lang, K::WillCreate)).weak());
-                            }
-                            if let Some(err) = &self.start_error {
-                                ui.colored_label(Color32::from_rgb(0xF4, 0x47, 0x47), err.as_str());
-                            }
-
-                            ui.add_space(6.0);
-                            ui.horizontal(|ui| {
-                                // «Создать» — только для нового имени, «Открыть» — только если проект уже есть
-                                if primary_on(ui, name_ok && !exists, tr(lang, K::Create)).clicked() {
+                                ui.label(tr(lang, K::ProjectName));
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.name)
+                                        .desired_width(f32::INFINITY),
+                                );
+                                if r.lost_focus()
+                                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    && name_ok
+                                    && !exists
+                                {
                                     action = Some(Action::Create);
                                 }
-                                if button_on(ui, exists, tr(lang, K::OpenExisting)).clicked() {
-                                    action = Some(Action::OpenTyped);
-                                }
-                            });
 
-                            if !self.found.is_empty() {
-                                ui.add_space(10.0);
-                                ui.label(RichText::new(tr(lang, K::FoundList)).small().weak());
-                                for n in &self.found {
-                                    if ui.selectable_label(n.as_str() == self.name.trim(), n.as_str()).clicked() {
-                                        action = Some(Action::PickProject(n.clone()));
+                                ui.label(tr(lang, K::Location));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.location)
+                                        .desired_width(f32::INFINITY),
+                                );
+                                let full = resolve_dir(&self.location).join(self.name.trim());
+                                ui.label(
+                                    RichText::new(format!("→ {}", full.display()))
+                                        .small()
+                                        .weak(),
+                                );
+
+                                if exists {
+                                    ui.colored_label(
+                                        Color32::from_rgb(0x4E, 0xC9, 0x7B),
+                                        tr(lang, K::FoundProject),
+                                    );
+                                } else if name_ok {
+                                    ui.label(RichText::new(tr(lang, K::WillCreate)).weak());
+                                }
+                                if let Some(err) = &self.start_error {
+                                    ui.colored_label(
+                                        Color32::from_rgb(0xF4, 0x47, 0x47),
+                                        err.as_str(),
+                                    );
+                                }
+
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    // «Создать» — только для нового имени, «Открыть» — только если проект уже есть
+                                    if primary_on(ui, name_ok && !exists, tr(lang, K::Create))
+                                        .clicked()
+                                    {
+                                        action = Some(Action::Create);
+                                    }
+                                    if button_on(ui, exists, tr(lang, K::OpenExisting)).clicked() {
+                                        action = Some(Action::OpenTyped);
+                                    }
+                                });
+
+                                if !self.found.is_empty() {
+                                    ui.add_space(10.0);
+                                    ui.label(RichText::new(tr(lang, K::FoundList)).small().weak());
+                                    for n in &self.found {
+                                        if ui
+                                            .selectable_label(
+                                                n.as_str() == self.name.trim(),
+                                                n.as_str(),
+                                            )
+                                            .clicked()
+                                        {
+                                            action = Some(Action::PickProject(n.clone()));
+                                        }
                                     }
                                 }
-                            }
 
-                            if !self.settings.recent.is_empty() {
-                                ui.add_space(14.0);
-                                ui.label(RichText::new(tr(lang, K::Recent)).small().weak());
-                                for r in &self.settings.recent {
-                                    if ui.link(r.as_str()).clicked() {
-                                        action = Some(Action::OpenRecent(r.clone()));
+                                if !self.settings.recent.is_empty() {
+                                    ui.add_space(14.0);
+                                    ui.label(RichText::new(tr(lang, K::Recent)).small().weak());
+                                    for r in &self.settings.recent {
+                                        if ui.link(r.as_str()).clicked() {
+                                            action = Some(Action::OpenRecent(r.clone()));
+                                        }
                                     }
                                 }
-                            }
-                        });
+                            },
+                        );
                     });
                 });
         }
 
         // #настройки проекта — окно с полями ic.toml и пояснением для пользователя
-if let Some(draft) = self.settings_draft.as_mut() {
-    let mut open = true;
-    egui::Window::new(tr(lang, K::ProjSettings))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
-            ui.set_max_width(420.0);
-            ui.label(RichText::new(tr(lang, K::ProjSettingsNote)).small().weak());
-            ui.add_space(8.0);
-            egui::Grid::new("project_settings").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
-                ui.label(tr(lang, K::SetTitle));
-                ui.text_edit_singleline(&mut draft.title);
-                ui.end_row();
+        if let Some(draft) = self.settings_draft.as_mut() {
+            let mut open = true;
+            egui::Window::new(tr(lang, K::ProjSettings))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.set_max_width(420.0);
+                    ui.label(RichText::new(tr(lang, K::ProjSettingsNote)).small().weak());
+                    ui.add_space(8.0);
+                    egui::Grid::new("project_settings")
+                        .num_columns(2)
+                        .spacing([14.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.label(tr(lang, K::SetTitle));
+                            ui.text_edit_singleline(&mut draft.title);
+                            ui.end_row();
 
-                ui.label(tr(lang, K::SetWindow));
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut draft.width).clamp_range(320..=7680).suffix(" px"));
-                    ui.label("×");
-                    ui.add(egui::DragValue::new(&mut draft.height).clamp_range(240..=4320).suffix(" px"));
+                            ui.label(tr(lang, K::SetWindow));
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::DragValue::new(&mut draft.width)
+                                        .clamp_range(320..=7680)
+                                        .suffix(" px"),
+                                );
+                                ui.label("×");
+                                ui.add(
+                                    egui::DragValue::new(&mut draft.height)
+                                        .clamp_range(240..=4320)
+                                        .suffix(" px"),
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.label(tr(lang, K::SetTick));
+                            ui.add(
+                                egui::DragValue::new(&mut draft.tick_rate)
+                                    .clamp_range(10..=480)
+                                    .suffix(" Hz"),
+                            );
+                            ui.end_row();
+
+                            ui.label(tr(lang, K::SetBackground));
+                            ui.color_edit_button_srgb(&mut draft.background);
+                            ui.end_row();
+                        });
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if primary_button(ui, tr(lang, K::Save)).clicked() {
+                            action = Some(Action::SaveSettings);
+                        }
+                        if button(ui, tr(lang, K::Cancel)).clicked() {
+                            action = Some(Action::CloseSettings);
+                        }
+                    });
                 });
-                ui.end_row();
-
-                ui.label(tr(lang, K::SetTick));
-                ui.add(egui::DragValue::new(&mut draft.tick_rate).clamp_range(10..=480).suffix(" Hz"));
-                ui.end_row();
-
-                ui.label(tr(lang, K::SetBackground));
-                ui.color_edit_button_srgb(&mut draft.background);
-                ui.end_row();
-            });
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if primary_button(ui, tr(lang, K::Save)).clicked() {
-                    action = Some(Action::SaveSettings);
-                }
-                if button(ui, tr(lang, K::Cancel)).clicked() {
-                    action = Some(Action::CloseSettings);
-                }
-            });
-        });
-    if !open {
-        action = Some(Action::CloseSettings);
-    }
-}
-
+            if !open {
+                action = Some(Action::CloseSettings);
+            }
+        }
 
         if let Some(a) = action {
             self.handle(ctx, a);
@@ -967,8 +1205,16 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([1000.0, 680.0])
             .with_min_inner_size([880.0, 480.0])
             .with_title("IC Studio")
-            .with_icon(egui::IconData { rgba: ICON_RGBA.to_vec(), width: 256, height: 256 }),
+            .with_icon(egui::IconData {
+                rgba: ICON_RGBA.to_vec(),
+                width: 256,
+                height: 256,
+            }),
         ..Default::default()
     };
-    eframe::run_native("IC Studio", options, Box::new(|cc| Ok(Box::new(Studio::new(cc)))))
+    eframe::run_native(
+        "IC Studio",
+        options,
+        Box::new(|cc| Ok(Box::new(Studio::new(cc)))),
+    )
 }
