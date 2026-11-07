@@ -71,6 +71,8 @@ pub fn tr(lang: Lang, k: K) -> &'static str {
         (Lang::Ru, Hint) => "«Собрать exe» кладёт один самостоятельный файл в <папка>/build/",
         (Lang::En, Hint) => "\"Build exe\" writes one standalone file to <folder>/build/",
         (Lang::Ru, IcMissing) => "Не найден файл ic рядом со Studio. Положи их в одну папку.",
-        (Lang::En, IcMissing) => "The 'ic' file was not found next to Studio. Keep them in one folder.",
+        (Lang::En, IcMissing) => {
+            "The 'ic' file was not found next to Studio. Keep them in one folder."
+        }
     }
 }
