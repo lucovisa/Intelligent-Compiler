@@ -31,7 +31,11 @@ fn ic_path() -> Option<PathBuf> {
 /// Относительные пути считаются от папки Studio, а не от того места, откуда её запустили.
 fn resolve_folder(input: &str) -> PathBuf {
     let p = PathBuf::from(input.trim());
-    if p.is_absolute() { p } else { exe_dir().unwrap_or_default().join(p) }
+    if p.is_absolute() {
+        p
+    } else {
+        exe_dir().unwrap_or_default().join(p)
+    }
 }
 
 /// Кэши шейдеров драйверов (Mesa / NVIDIA) по умолчанию лежат в ~/.cache — переносим рядом.
@@ -48,7 +52,10 @@ fn confine_caches() {
         set("__GL_SHADER_DISK_CACHE_PATH", cache.as_os_str());
         // потолок размера кэша: драйвер сам вытесняет старое
         set("MESA_SHADER_CACHE_MAX_SIZE", std::ffi::OsStr::new("256M"));
-        set("__GL_SHADER_DISK_CACHE_SIZE", std::ffi::OsStr::new("268435456"));
+        set(
+            "__GL_SHADER_DISK_CACHE_SIZE",
+            std::ffi::OsStr::new("268435456"),
+        );
     }
 }
 
@@ -63,12 +70,21 @@ impl Settings {
     }
 
     fn system_lang() -> Lang {
-        let v = env::var("LC_ALL").or_else(|_| env::var("LANG")).unwrap_or_default();
-        if v.starts_with("ru") { Lang::Ru } else { Lang::En }
+        let v = env::var("LC_ALL")
+            .or_else(|_| env::var("LANG"))
+            .unwrap_or_default();
+        if v.starts_with("ru") {
+            Lang::Ru
+        } else {
+            Lang::En
+        }
     }
 
     fn load() -> Self {
-        let mut s = Settings { dark: true, lang: Self::system_lang() };
+        let mut s = Settings {
+            dark: true,
+            lang: Self::system_lang(),
+        };
         if let Ok(text) = fs::read_to_string(Self::path()) {
             for line in text.lines() {
                 if let Some((k, v)) = line.split_once('=') {
@@ -89,7 +105,10 @@ impl Settings {
 
     fn save(&self) {
         let theme = if self.dark { "dark" } else { "light" };
-        let _ = fs::write(Self::path(), format!("theme={theme}\nlang={}\n", self.lang.code()));
+        let _ = fs::write(
+            Self::path(),
+            format!("theme={theme}\nlang={}\n", self.lang.code()),
+        );
     }
 }
 
@@ -97,18 +116,37 @@ fn setup_style(ctx: &egui::Context, dark: bool) {
     let mut style = (*ctx.style()).clone();
 
     style.text_styles = [
-        (egui::TextStyle::Heading, egui::FontId::new(24.0, egui::FontFamily::Proportional)),
-        (egui::TextStyle::Body, egui::FontId::new(16.0, egui::FontFamily::Proportional)),
-        (egui::TextStyle::Button, egui::FontId::new(16.0, egui::FontFamily::Proportional)),
-        (egui::TextStyle::Small, egui::FontId::new(13.0, egui::FontFamily::Proportional)),
-        (egui::TextStyle::Monospace, egui::FontId::new(14.0, egui::FontFamily::Monospace)),
+        (
+            egui::TextStyle::Heading,
+            egui::FontId::new(24.0, egui::FontFamily::Proportional),
+        ),
+        (
+            egui::TextStyle::Body,
+            egui::FontId::new(16.0, egui::FontFamily::Proportional),
+        ),
+        (
+            egui::TextStyle::Button,
+            egui::FontId::new(16.0, egui::FontFamily::Proportional),
+        ),
+        (
+            egui::TextStyle::Small,
+            egui::FontId::new(13.0, egui::FontFamily::Proportional),
+        ),
+        (
+            egui::TextStyle::Monospace,
+            egui::FontId::new(14.0, egui::FontFamily::Monospace),
+        ),
     ]
     .into();
     style.spacing.item_spacing = egui::vec2(10.0, 10.0);
     style.spacing.button_padding = egui::vec2(16.0, 8.0);
     style.spacing.interact_size.y = 36.0;
 
-    let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let mut v = if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
     let (panel, idle, hover, line, extreme) = if dark {
         (
             Color32::from_rgb(0x12, 0x13, 0x18),
@@ -154,16 +192,25 @@ fn setup_style(ctx: &egui::Context, dark: bool) {
 }
 
 fn card_fill(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode { Color32::from_rgb(0x1A, 0x1C, 0x24) } else { Color32::WHITE }
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(0x1A, 0x1C, 0x24)
+    } else {
+        Color32::WHITE
+    }
 }
 
 fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     let fill = card_fill(ui);
     let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-    egui::Frame::none().fill(fill).stroke(stroke).rounding(14.0).inner_margin(Margin::same(18.0)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        add(ui);
-    });
+    egui::Frame::none()
+        .fill(fill)
+        .stroke(stroke)
+        .rounding(14.0)
+        .inner_margin(Margin::same(18.0))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui);
+        });
 }
 
 fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
@@ -178,7 +225,11 @@ fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(egui::Button::new(text).min_size(egui::vec2(140.0, 40.0)))
 }
 
-fn pump<R: Read + Send + 'static>(r: Option<R>, tx: Sender<String>, ctx: egui::Context) -> Option<JoinHandle<()>> {
+fn pump<R: Read + Send + 'static>(
+    r: Option<R>,
+    tx: Sender<String>,
+    ctx: egui::Context,
+) -> Option<JoinHandle<()>> {
     r.map(|r| {
         thread::spawn(move || {
             for line in BufReader::new(r).lines().map_while(Result::ok) {
@@ -208,13 +259,21 @@ impl Studio {
             egui::TextureOptions::LINEAR,
         );
         let (tx, rx) = channel();
-        Self { settings, folder: "games/my_game".into(), log: Vec::new(), logo, tx, rx }
+        Self {
+            settings,
+            folder: "games/my_game".into(),
+            log: Vec::new(),
+            logo,
+            tx,
+            rx,
+        }
     }
 
     /// Запускает `ic <args>` и стримит вывод в журнал.
     fn run_ic(&mut self, ctx: &egui::Context, args: Vec<String>) {
         let Some(ic) = ic_path() else {
-            self.log.push(tr(self.settings.lang, K::IcMissing).to_string());
+            self.log
+                .push(tr(self.settings.lang, K::IcMissing).to_string());
             return;
         };
         self.log.push(format!("> ic {}", args.join(" ")));
@@ -270,10 +329,17 @@ impl eframe::App for Studio {
         let mut changed = false;
 
         egui::TopBottomPanel::top("top")
-            .frame(egui::Frame::none().fill(panel).inner_margin(Margin::symmetric(22.0, 14.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(panel)
+                    .inner_margin(Margin::symmetric(22.0, 14.0)),
+            )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(self.logo.id(), egui::vec2(38.0, 38.0))));
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        self.logo.id(),
+                        egui::vec2(38.0, 38.0),
+                    )));
                     ui.label(RichText::new("IC Studio").size(22.0).strong());
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -288,10 +354,18 @@ impl eframe::App for Studio {
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 3.0;
                                     let sun = ui
-                                        .selectable_value(&mut self.settings.dark, false, RichText::new("☀").size(20.0))
+                                        .selectable_value(
+                                            &mut self.settings.dark,
+                                            false,
+                                            RichText::new("☀").size(20.0),
+                                        )
                                         .on_hover_text(tr(lang, K::Light));
                                     let moon = ui
-                                        .selectable_value(&mut self.settings.dark, true, RichText::new("🌙").size(20.0))
+                                        .selectable_value(
+                                            &mut self.settings.dark,
+                                            true,
+                                            RichText::new("🌙").size(20.0),
+                                        )
                                         .on_hover_text(tr(lang, K::Dark));
                                     if sun.clicked() || moon.clicked() {
                                         changed = true;
@@ -301,13 +375,18 @@ impl eframe::App for Studio {
                         pill.response.on_hover_text(tr(lang, K::Theme));
 
                         ui.add_space(8.0);
-                        egui::ComboBox::from_id_source("lang").selected_text(lang.label()).show_ui(ui, |ui| {
-                            for l in Lang::ALL {
-                                if ui.selectable_value(&mut self.settings.lang, l, l.label()).clicked() {
-                                    changed = true;
+                        egui::ComboBox::from_id_source("lang")
+                            .selected_text(lang.label())
+                            .show_ui(ui, |ui| {
+                                for l in Lang::ALL {
+                                    if ui
+                                        .selectable_value(&mut self.settings.lang, l, l.label())
+                                        .clicked()
+                                    {
+                                        changed = true;
+                                    }
                                 }
-                            }
-                        });
+                            });
                         ui.label(tr(lang, K::Language));
                     });
                 });
@@ -321,7 +400,11 @@ impl eframe::App for Studio {
         let lang = self.settings.lang;
         let panel = ctx.style().visuals.panel_fill;
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(panel).inner_margin(Margin::symmetric(22.0, 6.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(panel)
+                    .inner_margin(Margin::symmetric(22.0, 6.0)),
+            )
             .show(ctx, |ui| {
                 card(ui, |ui| {
                     ui.label(RichText::new(tr(lang, K::ProjectFolder)).strong());
@@ -360,18 +443,22 @@ impl eframe::App for Studio {
                         });
                     });
                     let console_fill = ui.visuals().extreme_bg_color;
-                    egui::Frame::none().fill(console_fill).rounding(10.0).inner_margin(Margin::same(10.0)).show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        egui::ScrollArea::vertical()
-                            .stick_to_bottom(true)
-                            .auto_shrink([false, false])
-                            .max_height((avail - 120.0).max(80.0))
-                            .show(ui, |ui| {
-                                for line in &self.log {
-                                    ui.monospace(line);
-                                }
-                            });
-                    });
+                    egui::Frame::none()
+                        .fill(console_fill)
+                        .rounding(10.0)
+                        .inner_margin(Margin::same(10.0))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            egui::ScrollArea::vertical()
+                                .stick_to_bottom(true)
+                                .auto_shrink([false, false])
+                                .max_height((avail - 120.0).max(80.0))
+                                .show(ui, |ui| {
+                                    for line in &self.log {
+                                        ui.monospace(line);
+                                    }
+                                });
+                        });
                 });
             });
     }
@@ -384,8 +471,16 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([900.0, 640.0])
             .with_min_inner_size([680.0, 460.0])
             .with_title("IC Studio")
-            .with_icon(egui::IconData { rgba: ICON_RGBA.to_vec(), width: 256, height: 256 }),
+            .with_icon(egui::IconData {
+                rgba: ICON_RGBA.to_vec(),
+                width: 256,
+                height: 256,
+            }),
         ..Default::default()
     };
-    eframe::run_native("IC Studio", options, Box::new(|cc| Ok(Box::new(Studio::new(cc)))))
+    eframe::run_native(
+        "IC Studio",
+        options,
+        Box::new(|cc| Ok(Box::new(Studio::new(cc)))),
+    )
 }
