@@ -105,9 +105,7 @@ fn init_lua(dir: &Path) {
 
 fn init_rust(dir: &Path) {
     let raw = if dir == Path::new(".") {
-        env::current_dir()
-            .ok()
-            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+        env::current_dir().ok().and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
     } else {
         dir.file_name().map(|n| n.to_string_lossy().into_owned())
     };
@@ -141,8 +139,7 @@ fn setup_menu() {
     match ask("Выбор [1]: ").as_str() {
         "2" => {
             init_rust(Path::new("."));
-            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y")
-            {
+            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y") {
                 or_die(rust_mode::setup(Path::new(".")));
             } else {
                 println!("Позже: ic rust setup");
@@ -183,10 +180,7 @@ fn find_default() -> Option<PathBuf> {
 
 fn start(script: PathBuf) {
     // рабочая папка = папка игры, чтобы относительные пути (assets/…) работали
-    let file = script
-        .file_name()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("main.lua"));
+    let file = script.file_name().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("main.lua"));
     if let Some(dir) = script.parent().filter(|d| !d.as_os_str().is_empty()) {
         if let Err(e) = env::set_current_dir(dir) {
             die(&format!("не могу открыть папку игры: {e}"));
@@ -194,13 +188,20 @@ fn start(script: PathBuf) {
     }
     let game = or_die(LuaGame::new(&file));
     let title: &'static str = Box::leak(game.title().into_boxed_str());
-    run(
-        game,
-        Config {
-            title,
-            ..Default::default()
-        },
-    );
+    run(game, Config { title, ..Default::default() });
+}
+
+/// Кэши шейдеров драйверов (Mesa / NVIDIA) по умолчанию лежат в ~/.cache — переносим рядом с ic.
+fn confine_caches() {
+    if let Some(dir) = env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        let cache = dir.join("cache");
+        let _ = fs::create_dir_all(&cache);
+        for key in ["MESA_SHADER_CACHE_DIR", "__GL_SHADER_DISK_CACHE_PATH"] {
+            if env::var_os(key).is_none() {
+                env::set_var(key, &cache);
+            }
+        }
+    }
 }
 
 fn build_cmd(dir: &Path, out: Option<&Path>) {
@@ -209,33 +210,20 @@ fn build_cmd(dir: &Path, out: Option<&Path>) {
         .ok()
         .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "game".to_string());
-    let file = if cfg!(windows) {
-        format!("{name}.exe")
-    } else {
-        name
-    };
-    let out = out
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| dir.join("build").join(file));
+    let file = if cfg!(windows) { format!("{name}.exe") } else { name };
+    let out = out.map(Path::to_path_buf).unwrap_or_else(|| dir.join("build").join(file));
     let n = or_die(ic_build::pack(dir, &runtime, &out));
     println!("Собрано: {} ({n} файлов)", out.display());
 }
 
 fn main() {
+    confine_caches();
+
     // собранная игра: внутри этого exe уже лежат скрипты — просто запускаем их
-    if let Some(files) = env::current_exe()
-        .ok()
-        .and_then(|e| ic_build::read_embedded(&e))
-    {
+    if let Some(files) = env::current_exe().ok().and_then(|e| ic_build::read_embedded(&e)) {
         let game = or_die(LuaGame::from_files(files));
         let title: &'static str = Box::leak(game.title().into_boxed_str());
-        run(
-            game,
-            Config {
-                title,
-                ..Default::default()
-            },
-        );
+        run(game, Config { title, ..Default::default() });
         return;
     }
 
