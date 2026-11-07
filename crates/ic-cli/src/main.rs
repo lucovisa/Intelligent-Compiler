@@ -1,28 +1,61 @@
-//! `ic` — CLI движка: new / run / build / check
+//! `ic` — рантайм движка.
+//!   Режим А (по умолчанию): игры на Lua, ничего скачивать не нужно.
+//!   Режим Б (по желанию):   игры на Rust, компилятор качается локально в ./.ic/
+mod rust_mode;
+
+use ic_lua::LuaGame;
+use ic_render::{run, Config};
 use std::{
     env, fs,
-    path::Path,
-    process::{exit, Command},
+    io::Write,
+    path::{Path, PathBuf},
+    process::exit,
 };
 
 const HELP: &str = "\
-IC — Intelligent Compiler (game engine)
+IC — игровой движок
 
-  ic new <name>     создать проект
-  ic run            собрать и запустить (dev)
-  ic build          release-сборка (LTO)
-  ic check          fmt + clippy + test
+  ic                         запустить main.lua
+  ic <папка|файл.lua>        запустить указанную игру
+  ic new <имя>               новая игра на Lua (по умолчанию)
+  ic new <имя> --rust        новая игра на Rust (режим Б)
+  ic setup                   меню выбора режима
+  ic rust setup              скачать Rust в ./.ic/ (режим Б)
+  ic rust build | run        собрать / запустить Rust-игру
 ";
 
-const MAIN_TEMPLATE: &str = r#"use ic_render::{run, Config, Context, Game, Key, Vec2};
+const LUA_TEMPLATE: &str = r#"ic.title = "My IC Game"
 
-struct MyGame { pos: Vec2 }
+local x, y = 0, 0
+
+function ic.update(dt)
+    if ic.key_pressed("escape") then ic.quit() end
+
+    if ic.key_down("d") then x = x + 300 * dt end
+    if ic.key_down("a") then x = x - 300 * dt end
+    if ic.key_down("w") then y = y + 300 * dt end
+    if ic.key_down("s") then y = y - 300 * dt end
+
+    ic.rect(x, y, 60, 60, 1, 0.5, 0.1, 1, ic.time())
+end
+"#;
+
+const RUST_MAIN: &str = r#"use ic_render::{run, Config, Context, Game, Key, Vec2};
+
+struct MyGame {
+    pos: Vec2,
+}
 
 impl Game for MyGame {
     fn update(&mut self, ctx: &mut Context) {
-        if ctx.input.just_pressed(Key::Escape) { ctx.quit(); }
-        if ctx.input.is_down(Key::D) { self.pos.x += 300.0 * ctx.time.delta; }
-        if ctx.input.is_down(Key::A) { self.pos.x -= 300.0 * ctx.time.delta; }
+        if ctx.input.just_pressed(Key::Escape) {
+            ctx.quit();
+        }
+        let speed = 300.0 * ctx.time.delta;
+        if ctx.input.is_down(Key::D) { self.pos.x += speed; }
+        if ctx.input.is_down(Key::A) { self.pos.x -= speed; }
+        if ctx.input.is_down(Key::W) { self.pos.y += speed; }
+        if ctx.input.is_down(Key::S) { self.pos.y -= speed; }
         ctx.draw.rect(self.pos, Vec2::new(60.0, 60.0), [1.0, 0.5, 0.1, 1.0]);
     }
 }
@@ -32,54 +65,151 @@ fn main() {
 }
 "#;
 
-fn cargo(args: &[&str]) {
-    let status = Command::new("cargo")
-        .args(args)
-        .status()
-        .unwrap_or_else(|e| {
-            eprintln!("не удалось запустить cargo: {e}");
-            exit(1)
-        });
-    if !status.success() {
-        exit(status.code().unwrap_or(1));
-    }
+fn die(msg: &str) -> ! {
+    eprintln!("[IC] {msg}\n\nНажми Enter, чтобы закрыть...");
+    let mut s = String::new();
+    let _ = std::io::stdin().read_line(&mut s);
+    exit(1)
 }
 
-fn new_project(name: &str) {
-    let root = Path::new(name);
-    if root.exists() {
-        eprintln!("'{name}' уже существует");
-        exit(1);
+fn or_die<T>(r: Result<T, String>) -> T {
+    r.unwrap_or_else(|e| die(&e))
+}
+
+fn ask(prompt: &str) -> String {
+    print!("{prompt}");
+    let _ = std::io::stdout().flush();
+    let mut s = String::new();
+    let _ = std::io::stdin().read_line(&mut s);
+    s.trim().to_string()
+}
+
+fn write_if_absent(path: &Path, content: &str) -> Result<(), String> {
+    if path.exists() {
+        println!("уже есть: {}", path.display());
+        return Ok(());
     }
-    fs::create_dir_all(root.join("src")).expect("mkdir");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(path, content).map_err(|e| format!("{}: {e}", path.display()))?;
+    println!("создан: {}", path.display());
+    Ok(())
+}
+
+fn init_lua(dir: &Path) {
+    or_die(write_if_absent(&dir.join("main.lua"), LUA_TEMPLATE));
+    println!("Запуск: ic {}", dir.display());
+}
+
+fn init_rust(dir: &Path) {
+    let raw = if dir == Path::new(".") {
+        env::current_dir().ok().and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+    } else {
+        dir.file_name().map(|n| n.to_string_lossy().into_owned())
+    };
+    let mut name: String = raw
+        .unwrap_or_default()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+        name = format!("game_{name}");
+    }
+
     let manifest = format!(
         "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
-         [dependencies]\n# TODO: заменить на git/crates.io, когда опубликуешь\n\
-         ic-render = {{ git = \"https://github.com/YOUR_NAME/IC\" }}\n\n\
-         [profile.dev]\nopt-level = 1\n\n[profile.release]\nlto = \"fat\"\ncodegen-units = 1\n"
+         [dependencies]\nic-render = {{ git = \"https://github.com/lucovisa/IC\" }}\n\n\
+         [profile.dev]\nopt-level = 1\n\n[profile.dev.package.\"*\"]\nopt-level = 3\n\n\
+         [profile.release]\nlto = \"fat\"\ncodegen-units = 1\n"
     );
-    fs::write(root.join("Cargo.toml"), manifest).expect("write");
-    fs::write(root.join("src/main.rs"), MAIN_TEMPLATE).expect("write");
-    println!("Проект '{name}' создан. cd {name} && ic run");
+    or_die(write_if_absent(&dir.join("Cargo.toml"), &manifest));
+    or_die(write_if_absent(&dir.join("src/main.rs"), RUST_MAIN));
+    or_die(write_if_absent(&dir.join(".gitignore"), "/target\n/.ic\n"));
+}
+
+fn setup_menu() {
+    println!(
+        "IC — выбор режима для этой папки\n\n\
+         \x20 1) Lua   (по умолчанию) — ничего скачивать не нужно\n\
+         \x20 2) Rust  (по желанию)   — скачает компилятор (~1 ГБ) в ./.ic/ рядом\n"
+    );
+    match ask("Выбор [1]: ").as_str() {
+        "2" => {
+            init_rust(Path::new("."));
+            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y") {
+                or_die(rust_mode::setup(Path::new(".")));
+            } else {
+                println!("Позже: ic rust setup");
+            }
+        }
+        _ => {
+            init_lua(Path::new("."));
+            println!("Готово. Запусти ic ещё раз — игра стартует.");
+        }
+    }
+    let _ = ask("\nНажми Enter, чтобы закрыть...");
+}
+
+fn resolve(arg: &str) -> PathBuf {
+    let p = PathBuf::from(arg);
+    if p.is_dir() {
+        let m = p.join("main.lua");
+        if m.is_file() {
+            return m;
+        }
+        die(&format!("в папке '{arg}' нет main.lua"));
+    }
+    if p.is_file() {
+        return p;
+    }
+    die(&format!("не найдено: {arg}"))
+}
+
+fn find_default() -> Option<PathBuf> {
+    let local = PathBuf::from("main.lua");
+    if local.is_file() {
+        return Some(local);
+    }
+    let exe_dir = env::current_exe().ok()?.parent()?.to_path_buf();
+    let m = exe_dir.join("main.lua");
+    m.is_file().then_some(m)
+}
+
+fn start(script: PathBuf) {
+    // рабочая папка = папка игры, чтобы относительные пути (assets/…) работали
+    let file = script.file_name().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("main.lua"));
+    if let Some(dir) = script.parent().filter(|d| !d.as_os_str().is_empty()) {
+        if let Err(e) = env::set_current_dir(dir) {
+            die(&format!("не могу открыть папку игры: {e}"));
+        }
+    }
+    let game = or_die(LuaGame::new(&file));
+    let title: &'static str = Box::leak(game.title().into_boxed_str());
+    run(game, Config { title, ..Default::default() });
 }
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        Some("new") => match args.get(1) {
-            Some(n) => new_project(n),
-            None => {
-                eprintln!("ic new <name>");
-                exit(1)
-            }
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    match a.as_slice() {
+        [] => match find_default() {
+            Some(p) => start(p),
+            None => setup_menu(),
         },
-        Some("run") => cargo(&["run"]),
-        Some("build") => cargo(&["build", "--release"]),
-        Some("check") => {
-            cargo(&["fmt", "--check"]);
-            cargo(&["clippy", "--all-targets", "--", "-D", "warnings"]);
-            cargo(&["test"]);
+        ["help" | "-h" | "--help"] => print!("{HELP}"),
+        ["setup"] => setup_menu(),
+        ["new"] => die("ic new <имя> [--rust]"),
+        ["new", name, "--rust"] | ["new", "--rust", name] => {
+            init_rust(Path::new(name));
+            println!("Дальше: cd {name} && ic rust setup");
         }
+        ["new", name] => init_lua(Path::new(name)),
+        ["rust", "setup"] => or_die(rust_mode::setup(Path::new("."))),
+        ["rust", "build"] => or_die(rust_mode::cargo(Path::new("."), &["build", "--release"])),
+        ["rust", "run"] => or_die(rust_mode::cargo(Path::new("."), &["run", "--release"])),
+        [path] => start(resolve(path)),
         _ => print!("{HELP}"),
     }
 }

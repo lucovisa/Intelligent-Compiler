@@ -9,3 +9,5 @@ name = "ic"
 path = "src/main.rs"
 
 [dependencies]
+ic-lua = { path = "../ic-lua" }
+ic-render = { path = "../ic-render" }

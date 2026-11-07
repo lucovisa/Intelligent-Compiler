@@ -60,16 +60,21 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          mkdir dist
-          cp target/release/ic-demo${{ matrix.ext }} dist/ic-demo-${{ matrix.name }}${{ matrix.ext }}
-          cp target/release/ic${{ matrix.ext }} dist/ic-${{ matrix.name }}${{ matrix.ext }}
+          mkdir -p pkg dist
+          cp target/release/ic${{ matrix.ext }} pkg/
+          cp examples/demo/main.lua pkg/
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            (cd pkg && 7z a ../dist/ic-${{ matrix.name }}.zip .)
+          else
+            (cd pkg && zip -qr ../dist/ic-${{ matrix.name }}.zip .)
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: ic-${{ matrix.name }}
-          path: dist/*
+          path: pkg/*
           if-no-files-found: error
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: dist/*.zip

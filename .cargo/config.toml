@@ -1,2 +1,3 @@
+# Windows: вшиваем C-рантайм в .exe — ничего доустанавливать не нужно
 [target.'cfg(all(windows, target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]
