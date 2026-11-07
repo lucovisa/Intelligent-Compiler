@@ -1,5 +1,9 @@
 //! `ic` — CLI движка: new / run / build / check
-use std::{env, fs, path::Path, process::{exit, Command}};
+use std::{
+    env, fs,
+    path::Path,
+    process::{exit, Command},
+};
 
 const HELP: &str = "\
 IC — Intelligent Compiler (game engine)
@@ -29,11 +33,16 @@ fn main() {
 "#;
 
 fn cargo(args: &[&str]) {
-    let status = Command::new("cargo").args(args).status().unwrap_or_else(|e| {
-        eprintln!("не удалось запустить cargo: {e}");
-        exit(1)
-    });
-    if !status.success() { exit(status.code().unwrap_or(1)); }
+    let status = Command::new("cargo")
+        .args(args)
+        .status()
+        .unwrap_or_else(|e| {
+            eprintln!("не удалось запустить cargo: {e}");
+            exit(1)
+        });
+    if !status.success() {
+        exit(status.code().unwrap_or(1));
+    }
 }
 
 fn new_project(name: &str) {
@@ -59,7 +68,10 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("new") => match args.get(1) {
             Some(n) => new_project(n),
-            None => { eprintln!("ic new <name>"); exit(1) }
+            None => {
+                eprintln!("ic new <name>");
+                exit(1)
+            }
         },
         Some("run") => cargo(&["run"]),
         Some("build") => cargo(&["build", "--release"]),

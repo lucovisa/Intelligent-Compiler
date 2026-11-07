@@ -13,7 +13,9 @@ impl Rng {
         self.0 = x;
         ((x >> 40) as f32) / 16_777_216.0
     }
-    fn range(&mut self, lo: f32, hi: f32) -> f32 { lo + (hi - lo) * self.next_f32() }
+    fn range(&mut self, lo: f32, hi: f32) -> f32 {
+        lo + (hi - lo) * self.next_f32()
+    }
 }
 
 struct Particle {
@@ -65,10 +67,18 @@ impl Game for Demo {
         }
 
         let mut dir = Vec2::ZERO;
-        if ctx.input.is_down(Key::W) || ctx.input.is_down(Key::Up) { dir.y += 1.0; }
-        if ctx.input.is_down(Key::S) || ctx.input.is_down(Key::Down) { dir.y -= 1.0; }
-        if ctx.input.is_down(Key::D) || ctx.input.is_down(Key::Right) { dir.x += 1.0; }
-        if ctx.input.is_down(Key::A) || ctx.input.is_down(Key::Left) { dir.x -= 1.0; }
+        if ctx.input.is_down(Key::W) || ctx.input.is_down(Key::Up) {
+            dir.y += 1.0;
+        }
+        if ctx.input.is_down(Key::S) || ctx.input.is_down(Key::Down) {
+            dir.y -= 1.0;
+        }
+        if ctx.input.is_down(Key::D) || ctx.input.is_down(Key::Right) {
+            dir.x += 1.0;
+        }
+        if ctx.input.is_down(Key::A) || ctx.input.is_down(Key::Left) {
+            dir.x -= 1.0;
+        }
         self.player += dir * (400.0 * ctx.time.delta);
 
         ctx.draw.sprites.reserve(COUNT + 1);
@@ -99,7 +109,15 @@ impl Game for Demo {
 
 fn main() {
     run(
-        Demo { particles: Vec::with_capacity(COUNT), player: Vec2::ZERO, fps_timer: 0.0, fps_frames: 0 },
-        Config { title: "IC Demo", ..Default::default() },
+        Demo {
+            particles: Vec::with_capacity(COUNT),
+            player: Vec2::ZERO,
+            fps_timer: 0.0,
+            fps_frames: 0,
+        },
+        Config {
+            title: "IC Demo",
+            ..Default::default()
+        },
     );
 }
