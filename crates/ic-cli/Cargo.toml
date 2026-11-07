@@ -1,0 +1,14 @@
+[package]
+name = "ic-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ic"
+path = "src/main.rs"
+
+[dependencies]
+ic-build = { path = "../ic-build" }
+ic-lua = { path = "../ic-lua" }
+ic-render = { path = "../ic-render" }
