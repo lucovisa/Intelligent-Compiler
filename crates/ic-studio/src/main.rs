@@ -35,12 +35,21 @@ impl Settings {
     }
 
     fn system_lang() -> Lang {
-        let v = env::var("LC_ALL").or_else(|_| env::var("LANG")).unwrap_or_default();
-        if v.starts_with("ru") { Lang::Ru } else { Lang::En }
+        let v = env::var("LC_ALL")
+            .or_else(|_| env::var("LANG"))
+            .unwrap_or_default();
+        if v.starts_with("ru") {
+            Lang::Ru
+        } else {
+            Lang::En
+        }
     }
 
     fn load() -> Self {
-        let mut s = Settings { dark: true, lang: Self::system_lang() };
+        let mut s = Settings {
+            dark: true,
+            lang: Self::system_lang(),
+        };
         if let Ok(text) = fs::read_to_string(Self::path()) {
             for line in text.lines() {
                 if let Some((k, v)) = line.split_once('=') {
@@ -61,15 +70,26 @@ impl Settings {
 
     fn save(&self) {
         let theme = if self.dark { "dark" } else { "light" };
-        let _ = fs::write(Self::path(), format!("theme={theme}\nlang={}\n", self.lang.code()));
+        let _ = fs::write(
+            Self::path(),
+            format!("theme={theme}\nlang={}\n", self.lang.code()),
+        );
     }
 }
 
 fn apply_theme(ctx: &egui::Context, dark: bool) {
-    ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
+    ctx.set_visuals(if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    });
 }
 
-fn pump<R: Read + Send + 'static>(r: Option<R>, tx: Sender<String>, ctx: egui::Context) -> Option<JoinHandle<()>> {
+fn pump<R: Read + Send + 'static>(
+    r: Option<R>,
+    tx: Sender<String>,
+    ctx: egui::Context,
+) -> Option<JoinHandle<()>> {
     r.map(|r| {
         thread::spawn(move || {
             for line in BufReader::new(r).lines().map_while(Result::ok) {
@@ -93,13 +113,20 @@ impl Studio {
         let settings = Settings::load();
         apply_theme(&cc.egui_ctx, settings.dark);
         let (tx, rx) = channel();
-        Self { settings, folder: "my_game".into(), log: Vec::new(), tx, rx }
+        Self {
+            settings,
+            folder: "my_game".into(),
+            log: Vec::new(),
+            tx,
+            rx,
+        }
     }
 
     /// Запускает `ic <args>` и стримит вывод в журнал.
     fn run_ic(&mut self, ctx: &egui::Context, args: Vec<String>) {
         let Some(ic) = ic_path() else {
-            self.log.push(tr(self.settings.lang, K::IcMissing).to_string());
+            self.log
+                .push(tr(self.settings.lang, K::IcMissing).to_string());
             return;
         };
         self.log.push(format!("> ic {}", args.join(" ")));
@@ -107,7 +134,10 @@ impl Studio {
         let ctx = ctx.clone();
         thread::spawn(move || {
             let mut cmd = Command::new(ic);
-            cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            cmd.args(&args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
@@ -152,19 +182,30 @@ impl eframe::App for Studio {
             ui.horizontal(|ui| {
                 ui.heading("IC Studio");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    egui::ComboBox::from_id_source("lang").selected_text(lang.label()).show_ui(ui, |ui| {
-                        for l in Lang::ALL {
-                            if ui.selectable_value(&mut self.settings.lang, l, l.label()).clicked() {
-                                changed = true;
+                    egui::ComboBox::from_id_source("lang")
+                        .selected_text(lang.label())
+                        .show_ui(ui, |ui| {
+                            for l in Lang::ALL {
+                                if ui
+                                    .selectable_value(&mut self.settings.lang, l, l.label())
+                                    .clicked()
+                                {
+                                    changed = true;
+                                }
                             }
-                        }
-                    });
+                        });
                     ui.label(tr(lang, K::Language));
                     ui.add_space(12.0);
-                    if ui.selectable_value(&mut self.settings.dark, false, tr(lang, K::Light)).clicked() {
+                    if ui
+                        .selectable_value(&mut self.settings.dark, false, tr(lang, K::Light))
+                        .clicked()
+                    {
                         changed = true;
                     }
-                    if ui.selectable_value(&mut self.settings.dark, true, tr(lang, K::Dark)).clicked() {
+                    if ui
+                        .selectable_value(&mut self.settings.dark, true, tr(lang, K::Dark))
+                        .clicked()
+                    {
                         changed = true;
                     }
                     ui.label(tr(lang, K::Theme));
@@ -204,19 +245,28 @@ impl eframe::App for Studio {
                     self.log.clear();
                 }
             });
-            egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                for line in &self.log {
-                    ui.monospace(line);
-                }
-            });
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for line in &self.log {
+                        ui.monospace(line);
+                    }
+                });
         });
     }
 }
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([820.0, 560.0]).with_title("IC Studio"),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([820.0, 560.0])
+            .with_title("IC Studio"),
         ..Default::default()
     };
-    eframe::run_native("IC Studio", options, Box::new(|cc| Ok(Box::new(Studio::new(cc)))))
+    eframe::run_native(
+        "IC Studio",
+        options,
+        Box::new(|cc| Ok(Box::new(Studio::new(cc)))),
+    )
 }
