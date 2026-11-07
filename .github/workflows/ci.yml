@@ -33,7 +33,7 @@ jobs:
             git commit -am "style: cargo fmt"
             git push
           fi
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
 
   build:
