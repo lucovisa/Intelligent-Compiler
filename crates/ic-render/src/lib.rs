@@ -39,7 +39,7 @@ pub fn run<G: Game + 'static>(game: G, cfg: Config) {
     let window = Arc::new(
         WindowBuilder::new()
             .with_title(cfg.title)
-            .with_inner_size(LogicalSize::new(1280.0, 720.0))
+            .with_inner_size(LogicalSize::new(cfg.width as f64, cfg.height as f64))
             .build(&event_loop)
             .expect("window"),
     );
@@ -61,12 +61,7 @@ pub fn run<G: Game + 'static>(game: G, cfg: Config) {
                     engine.ctx.screen_size = Vec2::new(s.width as f32, s.height as f32);
                 }
                 WindowEvent::KeyboardInput {
-                    event:
-                        KeyEvent {
-                            physical_key: PhysicalKey::Code(code),
-                            state,
-                            ..
-                        },
+                    event: KeyEvent { physical_key: PhysicalKey::Code(code), state, .. },
                     ..
                 } => {
                     if let Some(k) = map_key(code) {

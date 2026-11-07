@@ -10,22 +10,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod settings;
+pub use settings::ProjectSettings;
+
 const MAGIC: &[u8; 8] = b"ICGAME01";
 const SKIP_DIRS: [&str; 5] = [".ic", "target", ".git", "build", ".cargo"];
-const SKIP_FILES: [&str; 5] = [
-    "ic",
-    "ic.exe",
-    "ic-studio",
-    "ic-studio.exe",
-    "ic-settings.txt",
-];
+const SKIP_FILES: [&str; 5] = ["ic", "ic.exe", "ic-studio", "ic-studio.exe", "ic-settings.txt"];
 
-fn walk(
-    root: &Path,
-    cur: &Path,
-    skip: Option<&Path>,
-    out: &mut Vec<(String, PathBuf)>,
-) -> Result<(), String> {
+fn walk(root: &Path, cur: &Path, skip: Option<&Path>, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
     let entries = fs::read_dir(cur).map_err(|e| format!("{}: {e}", cur.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -51,18 +43,18 @@ fn walk(
     Ok(())
 }
 
-/// Собирает `project` + `runtime` в файл `out`. Возвращает число упакованных файлов.
-pub fn pack(project: &Path, runtime: &Path, out: &Path) -> Result<usize, String> {
-    if !project.join("main.lua").is_file() {
-        return Err(format!("в {} нет main.lua", project.display()));
-    }
+/// Файлы проекта (без служебных папок и самого runtime): (путь внутри архива, путь на диске).
+pub fn collect(project: &Path, runtime: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     let runtime_canon = fs::canonicalize(runtime).ok();
     let mut files = Vec::new();
     walk(project, project, runtime_canon.as_deref(), &mut files)?;
+    Ok(files)
+}
 
+/// Склеивает runtime + файлы в один exe. Возвращает размер результата в байтах.
+pub fn pack_entries(entries: &[(String, Vec<u8>)], runtime: &Path, out: &Path) -> Result<u64, String> {
     let mut payload: Vec<u8> = Vec::new();
-    for (rel, path) in &files {
-        let data = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    for (rel, data) in entries {
         payload.extend((rel.len() as u32).to_le_bytes());
         payload.extend(rel.as_bytes());
         payload.extend((data.len() as u64).to_le_bytes());
@@ -77,14 +69,28 @@ pub fn pack(project: &Path, runtime: &Path, out: &Path) -> Result<usize, String>
     if let Some(parent) = out.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(out, exe).map_err(|e| format!("{}: {e}", out.display()))?;
+    fs::write(out, &exe).map_err(|e| format!("{}: {e}", out.display()))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(out, fs::Permissions::from_mode(0o755));
     }
-    Ok(files.len())
+    Ok(exe.len() as u64)
+}
+
+/// Собирает `project` + `runtime` в файл `out`. Возвращает число упакованных файлов.
+pub fn pack(project: &Path, runtime: &Path, out: &Path) -> Result<usize, String> {
+    if !project.join("main.lua").is_file() {
+        return Err(format!("в {} нет main.lua", project.display()));
+    }
+    let mut entries = Vec::new();
+    for (rel, path) in collect(project, runtime)? {
+        let data = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        entries.push((rel, data));
+    }
+    pack_entries(&entries, runtime, out)?;
+    Ok(entries.len())
 }
 
 /// Если в конце `exe` лежит игра — возвращает её файлы (путь -> данные).

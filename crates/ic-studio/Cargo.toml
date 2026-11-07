@@ -6,3 +6,4 @@ license.workspace = true
 
 [dependencies]
 eframe = "0.28"
+ic-build = { path = "../ic-build" }
