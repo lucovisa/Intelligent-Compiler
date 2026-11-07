@@ -93,8 +93,16 @@ pub fn tr(lang: Lang, k: K) -> &'static str {
             "Введи название без символов / и \\",
             "Enter a name without / or \\ characters",
         ),
-        K::ErrNotProject => pick(lang, "В этой папке нет main.lua", "No main.lua in this folder"),
-        K::ErrCreate => pick(lang, "Не удалось создать проект", "Could not create the project"),
+        K::ErrNotProject => pick(
+            lang,
+            "В этой папке нет main.lua",
+            "No main.lua in this folder",
+        ),
+        K::ErrCreate => pick(
+            lang,
+            "Не удалось создать проект",
+            "Could not create the project",
+        ),
         K::IcMissing => pick(
             lang,
             "Не найден файл ic рядом со Studio. Держи их в одной папке.",
@@ -105,7 +113,11 @@ pub fn tr(lang: Lang, k: K) -> &'static str {
         K::Save => pick(lang, "Сохранить", "Save"),
         K::Close => pick(lang, "Закрыть проект", "Close project"),
         K::Unsaved => pick(lang, "не сохранено", "unsaved"),
-        K::NotText => pick(lang, "Этот файл нельзя открыть как текст", "This file cannot be opened as text"),
+        K::NotText => pick(
+            lang,
+            "Этот файл нельзя открыть как текст",
+            "This file cannot be opened as text",
+        ),
 
         K::Run => pick(lang, "Запустить", "Run"),
         K::Build => pick(lang, "Собрать exe", "Build exe"),

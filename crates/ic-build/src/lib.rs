@@ -12,9 +12,20 @@ use std::{
 
 const MAGIC: &[u8; 8] = b"ICGAME01";
 const SKIP_DIRS: [&str; 5] = [".ic", "target", ".git", "build", ".cargo"];
-const SKIP_FILES: [&str; 5] = ["ic", "ic.exe", "ic-studio", "ic-studio.exe", "ic-settings.txt"];
+const SKIP_FILES: [&str; 5] = [
+    "ic",
+    "ic.exe",
+    "ic-studio",
+    "ic-studio.exe",
+    "ic-settings.txt",
+];
 
-fn walk(root: &Path, cur: &Path, skip: Option<&Path>, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
+fn walk(
+    root: &Path,
+    cur: &Path,
+    skip: Option<&Path>,
+    out: &mut Vec<(String, PathBuf)>,
+) -> Result<(), String> {
     let entries = fs::read_dir(cur).map_err(|e| format!("{}: {e}", cur.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
