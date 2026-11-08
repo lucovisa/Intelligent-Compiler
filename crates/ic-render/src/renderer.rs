@@ -64,7 +64,12 @@ impl Renderer {
         .expect("request device");
 
         let caps = surface.get_capabilities(&adapter);
-        let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -104,7 +109,10 @@ impl Renderer {
         let cam_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera bg"),
             layout: &bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: cam_buf.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: cam_buf.as_entire_binding(),
+            }],
         });
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -142,11 +150,24 @@ impl Renderer {
         let inst_cap = 1024;
         let inst_buf = make_inst_buf(&device, inst_cap);
 
-        Self { surface, device, queue, config, pipeline, cam_buf, cam_bg, inst_buf, inst_cap, scratch: Vec::new() }
+        Self {
+            surface,
+            device,
+            queue,
+            config,
+            pipeline,
+            cam_buf,
+            cam_bg,
+            inst_buf,
+            inst_cap,
+            scratch: Vec::new(),
+        }
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
-        if w == 0 || h == 0 { return; }
+        if w == 0 || h == 0 {
+            return;
+        }
         self.config.width = w;
         self.config.height = h;
         self.surface.configure(&self.device, &self.config);
@@ -156,7 +177,11 @@ impl Renderer {
         let aspect = self.config.width as f32 / self.config.height as f32;
         let half_y = cam.height * 0.5;
         let half_x = half_y * aspect;
-        self.queue.write_buffer(&self.cam_buf, 0, bytemuck::bytes_of(&[cam.center.x, cam.center.y, half_x, half_y]));
+        self.queue.write_buffer(
+            &self.cam_buf,
+            0,
+            bytemuck::bytes_of(&[cam.center.x, cam.center.y, half_x, half_y]),
+        );
 
         self.scratch.clear();
         self.scratch.extend(sprites.iter().map(|s| Instance {
@@ -171,7 +196,8 @@ impl Renderer {
             self.inst_buf = make_inst_buf(&self.device, self.inst_cap);
         }
         if !self.scratch.is_empty() {
-            self.queue.write_buffer(&self.inst_buf, 0, bytemuck::cast_slice(&self.scratch));
+            self.queue
+                .write_buffer(&self.inst_buf, 0, bytemuck::cast_slice(&self.scratch));
         }
 
         let frame = match self.surface.get_current_texture() {
@@ -183,8 +209,14 @@ impl Renderer {
             Err(wgpu::SurfaceError::OutOfMemory) => panic!("GPU out of memory"),
             Err(_) => return,
         };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("ic encoder") });
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("ic encoder"),
+            });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("ic pass"),
@@ -192,7 +224,12 @@ impl Renderer {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: clear[0], g: clear[1], b: clear[2], a: clear[3] }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: clear[0],
+                            g: clear[1],
+                            b: clear[2],
+                            a: clear[3],
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

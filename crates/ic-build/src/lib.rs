@@ -1,5 +1,5 @@
-mod settings;
 pub mod scaffold;
+mod settings;
 
 pub use settings::ProjectSettings;
 
@@ -14,7 +14,12 @@ const MAGIC: &[u8; 8] = b"ICGAME01";
 const SKIP_DIRS: [&str; 5] = [".ic", "target", ".git", "build", ".cargo"];
 const SKIP_FILES: &[&str] = &["ic", "ic.exe", "ic-settings.txt", "ic-error.log"];
 
-fn walk(root: &Path, cur: &Path, skip: Option<&Path>, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
+fn walk(
+    root: &Path,
+    cur: &Path,
+    skip: Option<&Path>,
+    out: &mut Vec<(String, PathBuf)>,
+) -> Result<(), String> {
     let entries = fs::read_dir(cur).map_err(|e| format!("{}: {e}", cur.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -47,7 +52,11 @@ pub fn collect(project: &Path, runtime: &Path) -> Result<Vec<(String, PathBuf)>,
     Ok(files)
 }
 
-pub fn write_game(entries: &[(String, Vec<u8>)], runtime: &[u8], out: &Path) -> Result<u64, String> {
+pub fn write_game(
+    entries: &[(String, Vec<u8>)],
+    runtime: &[u8],
+    out: &Path,
+) -> Result<u64, String> {
     let mut payload: Vec<u8> = Vec::new();
     for (rel, data) in entries {
         payload.extend((rel.len() as u32).to_le_bytes());
@@ -75,7 +84,11 @@ pub fn write_game(entries: &[(String, Vec<u8>)], runtime: &[u8], out: &Path) -> 
     Ok(exe.len() as u64)
 }
 
-pub fn pack_entries(entries: &[(String, Vec<u8>)], runtime: &Path, out: &Path) -> Result<u64, String> {
+pub fn pack_entries(
+    entries: &[(String, Vec<u8>)],
+    runtime: &Path,
+    out: &Path,
+) -> Result<u64, String> {
     let rt = fs::read(runtime).map_err(|e| format!("{}: {e}", runtime.display()))?;
     write_game(entries, &rt, out)
 }

@@ -4,7 +4,11 @@ use ic_render::{run, Config};
 use std::{collections::HashMap, env, fs, path::Path};
 
 pub fn make_config(s: &ProjectSettings, lua_title: Option<String>) -> Config {
-    let title: &'static str = Box::leak(lua_title.unwrap_or_else(|| s.title.clone()).into_boxed_str());
+    let title: &'static str = Box::leak(
+        lua_title
+            .unwrap_or_else(|| s.title.clone())
+            .into_boxed_str(),
+    );
     Config {
         title,
         width: s.width,
@@ -27,7 +31,10 @@ pub fn run_embedded(files: HashMap<String, Vec<u8>>) -> Result<(), String> {
 }
 
 pub fn confine_caches() {
-    if let Some(dir) = env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
         let cache = dir.join("cache");
         let _ = fs::create_dir_all(&cache);
         let set = |k: &str, v: &std::ffi::OsStr| {
@@ -38,6 +45,9 @@ pub fn confine_caches() {
         set("MESA_SHADER_CACHE_DIR", cache.as_os_str());
         set("__GL_SHADER_DISK_CACHE_PATH", cache.as_os_str());
         set("MESA_SHADER_CACHE_MAX_SIZE", std::ffi::OsStr::new("256M"));
-        set("__GL_SHADER_DISK_CACHE_SIZE", std::ffi::OsStr::new("268435456"));
+        set(
+            "__GL_SHADER_DISK_CACHE_SIZE",
+            std::ffi::OsStr::new("268435456"),
+        );
     }
 }

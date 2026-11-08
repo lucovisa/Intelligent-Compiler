@@ -14,7 +14,14 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { title: "IC Game", tick_rate: 60, max_frames: None, clear_color: [0.02, 0.02, 0.05, 1.0], width: 1280, height: 720 }
+        Self {
+            title: "IC Game",
+            tick_rate: 60,
+            max_frames: None,
+            clear_color: [0.02, 0.02, 0.05, 1.0],
+            width: 1280,
+            height: 720,
+        }
     }
 }
 
@@ -27,13 +34,34 @@ pub struct Time {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Key { Left, Right, Up, Down, W, A, S, D, Space, Escape, Enter }
+pub enum Key {
+    Left,
+    Right,
+    Up,
+    Down,
+    W,
+    A,
+    S,
+    D,
+    Space,
+    Escape,
+    Enter,
+}
 pub const KEY_COUNT: usize = 11;
 
 impl Key {
     pub const ALL: [Key; KEY_COUNT] = [
-        Key::Left, Key::Right, Key::Up, Key::Down, Key::W, Key::A,
-        Key::S, Key::D, Key::Space, Key::Escape, Key::Enter,
+        Key::Left,
+        Key::Right,
+        Key::Up,
+        Key::Down,
+        Key::W,
+        Key::A,
+        Key::S,
+        Key::D,
+        Key::Space,
+        Key::Escape,
+        Key::Enter,
     ];
 }
 
@@ -44,14 +72,22 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn is_down(&self, k: Key) -> bool { self.down[k as usize] }
-    pub fn just_pressed(&self, k: Key) -> bool { self.pressed[k as usize] }
+    pub fn is_down(&self, k: Key) -> bool {
+        self.down[k as usize]
+    }
+    pub fn just_pressed(&self, k: Key) -> bool {
+        self.pressed[k as usize]
+    }
     pub fn set(&mut self, k: Key, is_down: bool) {
         let i = k as usize;
-        if is_down && !self.down[i] { self.pressed[i] = true; }
+        if is_down && !self.down[i] {
+            self.pressed[i] = true;
+        }
         self.down[i] = is_down;
     }
-    pub fn end_frame(&mut self) { self.pressed = [false; KEY_COUNT]; }
+    pub fn end_frame(&mut self) {
+        self.pressed = [false; KEY_COUNT];
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -68,10 +104,19 @@ pub struct DrawList {
 }
 
 impl DrawList {
-    pub fn clear(&mut self) { self.sprites.clear(); }
-    pub fn sprite(&mut self, s: Sprite) { self.sprites.push(s); }
+    pub fn clear(&mut self) {
+        self.sprites.clear();
+    }
+    pub fn sprite(&mut self, s: Sprite) {
+        self.sprites.push(s);
+    }
     pub fn rect(&mut self, pos: Vec2, size: Vec2, color: [f32; 4]) {
-        self.sprites.push(Sprite { pos, size, rotation: 0.0, color });
+        self.sprites.push(Sprite {
+            pos,
+            size,
+            rotation: 0.0,
+            color,
+        });
     }
 }
 
@@ -81,7 +126,12 @@ pub struct Camera2D {
 }
 
 impl Default for Camera2D {
-    fn default() -> Self { Self { center: Vec2::ZERO, height: 720.0 } }
+    fn default() -> Self {
+        Self {
+            center: Vec2::ZERO,
+            height: 720.0,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -95,7 +145,9 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn quit(&mut self) { self.quit = true; }
+    pub fn quit(&mut self) {
+        self.quit = true;
+    }
 }
 
 pub trait Game {
@@ -121,7 +173,14 @@ impl<G: Game> Engine<G> {
         ctx.time.fixed_delta = fixed;
         ctx.screen_size = Vec2::new(1280.0, 720.0);
         let now = Instant::now();
-        Self { game, ctx, fixed, acc: 0.0, start: now, last: now }
+        Self {
+            game,
+            ctx,
+            fixed,
+            acc: 0.0,
+            start: now,
+            last: now,
+        }
     }
 
     pub fn start(&mut self) {
@@ -150,9 +209,13 @@ impl<G: Game> Engine<G> {
         self.ctx.input.end_frame();
     }
 
-    pub fn should_quit(&self) -> bool { self.ctx.quit }
+    pub fn should_quit(&self) -> bool {
+        self.ctx.quit
+    }
 
-    pub fn shutdown(&mut self) { self.game.shutdown(&mut self.ctx); }
+    pub fn shutdown(&mut self) {
+        self.game.shutdown(&mut self.ctx);
+    }
 }
 
 pub fn run<G: Game>(game: G, cfg: Config) {
@@ -173,7 +236,9 @@ pub fn run<G: Game>(game: G, cfg: Config) {
 mod tests {
     use super::*;
 
-    struct Counter { frames: u32 }
+    struct Counter {
+        frames: u32,
+    }
     impl Game for Counter {
         fn update(&mut self, ctx: &mut Context) {
             self.frames += 1;
@@ -185,7 +250,9 @@ mod tests {
     fn engine_counts_frames() {
         let mut e = Engine::new(Counter { frames: 0 }, 60);
         e.start();
-        for _ in 0..10 { e.frame(); }
+        for _ in 0..10 {
+            e.frame();
+        }
         assert_eq!(e.game.frames, 10);
         assert_eq!(e.ctx.draw.sprites.len(), 1);
     }

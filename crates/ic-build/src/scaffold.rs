@@ -57,7 +57,12 @@ pub enum Generator {
 }
 
 impl Generator {
-    pub const ALL: [Generator; 4] = [Generator::Scene, Generator::Fps, Generator::Physics, Generator::Camera];
+    pub const ALL: [Generator; 4] = [
+        Generator::Scene,
+        Generator::Fps,
+        Generator::Physics,
+        Generator::Camera,
+    ];
 
     pub fn key(self) -> &'static str {
         match self {
@@ -111,7 +116,13 @@ pub struct NewProject {
 
 impl Default for NewProject {
     fn default() -> Self {
-        Self { kind: Kind::Game, dimension: Dimension::D2, label: String::new(), generators: Vec::new(), default_code: true }
+        Self {
+            kind: Kind::Game,
+            dimension: Dimension::D2,
+            label: String::new(),
+            generators: Vec::new(),
+            default_code: true,
+        }
     }
 }
 
@@ -171,7 +182,10 @@ mod tests {
     #[test]
     fn game_with_default_code_and_generators() {
         let dir = tmp("game");
-        let opts = NewProject { generators: vec![Generator::Fps, Generator::Physics], ..Default::default() };
+        let opts = NewProject {
+            generators: vec![Generator::Fps, Generator::Physics],
+            ..Default::default()
+        };
         let made = create(&dir, &opts).unwrap();
         assert!(made.contains(&"main.lua".to_string()) && made.contains(&"ic.toml".to_string()));
         assert!(dir.join("fps.lua").is_file() && dir.join("physics.lua").is_file());
@@ -185,7 +199,11 @@ mod tests {
     #[test]
     fn app_without_default_code_is_empty() {
         let dir = tmp("app");
-        let opts = NewProject { kind: Kind::App, default_code: false, ..Default::default() };
+        let opts = NewProject {
+            kind: Kind::App,
+            default_code: false,
+            ..Default::default()
+        };
         create(&dir, &opts).unwrap();
         assert!(fs::read_to_string(dir.join("main.lua")).unwrap().is_empty());
         assert!(!dir.join("fps.lua").exists());

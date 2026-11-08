@@ -63,7 +63,10 @@ fn main() {
 fn die(msg: &str) -> ! {
     eprintln!("[IC] {msg}\n\nНажми Enter, чтобы закрыть...");
     if cfg!(windows) {
-        if let Some(dir) = env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        if let Some(dir) = env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(Path::to_path_buf))
+        {
             let _ = fs::write(dir.join("ic-error.log"), msg);
         }
     }
@@ -114,7 +117,9 @@ fn init_lua(dir: &Path) {
 
 fn init_rust(dir: &Path) {
     let raw = if dir == Path::new(".") {
-        env::current_dir().ok().and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+        env::current_dir()
+            .ok()
+            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
     } else {
         dir.file_name().map(|n| n.to_string_lossy().into_owned())
     };
@@ -147,7 +152,8 @@ fn setup_menu() {
     match ask("Выбор [1]: ").as_str() {
         "2" => {
             init_rust(Path::new("."));
-            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y") {
+            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y")
+            {
                 or_die(rust_mode::setup(Path::new(".")));
             } else {
                 println!("Позже: ic rust setup");
@@ -177,7 +183,10 @@ fn resolve(arg: &str) -> PathBuf {
 }
 
 fn start(script: PathBuf) {
-    let file = script.file_name().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("main.lua"));
+    let file = script
+        .file_name()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("main.lua"));
     if let Some(dir) = script.parent().filter(|d| !d.as_os_str().is_empty()) {
         if let Err(e) = env::set_current_dir(dir) {
             die(&format!("не могу открыть папку игры: {e}"));
@@ -209,9 +218,15 @@ fn host_os() -> &'static str {
 
 fn resolve_runtime(target: &str) -> Result<(Runtime, &'static str), String> {
     let host = host_os();
-    let t = if target.is_empty() || target == "this" { host } else { target };
+    let t = if target.is_empty() || target == "this" {
+        host
+    } else {
+        target
+    };
     if !["windows", "linux", "macos"].contains(&t) {
-        return Err(format!("неизвестная платформа «{t}» (windows, linux, macos)"));
+        return Err(format!(
+            "неизвестная платформа «{t}» (windows, linux, macos)"
+        ));
     }
     let ext = if t == "windows" { ".exe" } else { "" };
     let me = env::current_exe().map_err(|e| e.to_string())?;
@@ -226,7 +241,10 @@ fn resolve_runtime(target: &str) -> Result<(Runtime, &'static str), String> {
     if p.is_file() {
         Ok((Runtime::File(p), ext))
     } else {
-        Err(format!("нет шаблона {} — положи туда файл ic для {t} (из релиза для этой системы)", p.display()))
+        Err(format!(
+            "нет шаблона {} — положи туда файл ic для {t} (из релиза для этой системы)",
+            p.display()
+        ))
     }
 }
 
@@ -234,7 +252,15 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
     let t0 = Instant::now();
     let total = if pack { 4 } else { 3 };
     let exe = or_die(env::current_exe().map_err(|e| e.to_string()));
-    println!("[IC] {}: {}", if pack { "Сборка" } else { "Проверка" }, dir.display());
+    println!(
+        "[IC] {}: {}",
+        if pack {
+            "Сборка"
+        } else {
+            "Проверка"
+        },
+        dir.display()
+    );
 
     if !dir.join("main.lua").is_file() {
         println!("[IC] Ошибка: в {} нет main.lua", dir.display());
@@ -247,13 +273,24 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
         let data = or_die(fs::read(path).map_err(|e| format!("{}: {e}", path.display())));
         entries.push((rel.clone(), data));
     }
-    println!("[1/{total}] Читаю проект ........ файлов: {}", entries.len());
+    println!(
+        "[1/{total}] Читаю проект ........ файлов: {}",
+        entries.len()
+    );
 
     let (proj_settings, toml_warnings) = ic_build::ProjectSettings::load(dir);
     let diags = ic_lua::check_sources(&entries);
     let errors = diags.iter().filter(|d| d.is_error).count();
     for d in &diags {
-        println!("  {}: {}", if d.is_error { "ошибка" } else { "предупреждение" }, d.message);
+        println!(
+            "  {}: {}",
+            if d.is_error {
+                "ошибка"
+            } else {
+                "предупреждение"
+            },
+            d.message
+        );
     }
     for w in &toml_warnings {
         println!("  предупреждение: {w}");
@@ -276,15 +313,23 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
         .ok()
         .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "game".to_string());
-    let target_name = target.map(str::to_string).unwrap_or_else(|| proj_settings.target.clone());
+    let target_name = target
+        .map(str::to_string)
+        .unwrap_or_else(|| proj_settings.target.clone());
     let (runtime, ext) = or_die(resolve_runtime(&target_name));
     let file = format!("{name}{ext}");
-    let out = out.map(Path::to_path_buf).unwrap_or_else(|| dir.join("build").join(file));
+    let out = out
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| dir.join("build").join(file));
     let size = or_die(match &runtime {
         Runtime::Embedded(bytes) => ic_build::write_game(&entries, bytes, &out),
         Runtime::File(path) => ic_build::pack_entries(&entries, path, &out),
     });
-    println!("[4/{total}] Упаковываю .......... {} ({:.1} МБ)", out.display(), size as f64 / 1_048_576.0);
+    println!(
+        "[4/{total}] Упаковываю .......... {} ({:.1} МБ)",
+        out.display(),
+        size as f64 / 1_048_576.0
+    );
     println!("[IC] Готово за {:.2} с", t0.elapsed().as_secs_f32());
 }
 
@@ -333,7 +378,9 @@ fn new_args(rest: &[&str]) {
                 for g in list.split(',').filter(|s| !s.is_empty()) {
                     match Generator::parse(g) {
                         Some(g) => opts.generators.push(g),
-                        None => die(&format!("неизвестная заготовка «{g}» (scene, fps, physics, camera)")),
+                        None => die(&format!(
+                            "неизвестная заготовка «{g}» (scene, fps, physics, camera)"
+                        )),
                     }
                 }
             }
@@ -392,7 +439,10 @@ fn main() {
         attach_parent_console();
     }
 
-    if let Some(files) = env::current_exe().ok().and_then(|e| ic_build::read_embedded(&e)) {
+    if let Some(files) = env::current_exe()
+        .ok()
+        .and_then(|e| ic_build::read_embedded(&e))
+    {
         or_die(ic_player::run_embedded(files));
         return;
     }
