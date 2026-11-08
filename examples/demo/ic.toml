@@ -1,0 +1,7 @@
+# Настройки проекта IC. Меняй здесь или в окне IC → «Настройки».
+title = "IC Demo (Lua)"
+width = 1280
+height = 720
+tick_rate = 60
+background = "#26263f"
+target = "this"

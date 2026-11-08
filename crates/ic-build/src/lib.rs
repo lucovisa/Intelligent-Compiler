@@ -15,20 +15,9 @@ pub use settings::ProjectSettings;
 
 const MAGIC: &[u8; 8] = b"ICGAME01";
 const SKIP_DIRS: [&str; 5] = [".ic", "target", ".git", "build", ".cargo"];
-const SKIP_FILES: [&str; 5] = [
-    "ic",
-    "ic.exe",
-    "ic-studio",
-    "ic-studio.exe",
-    "ic-settings.txt",
-];
+const SKIP_FILES: &[&str] = &["ic", "ic.exe", "ic-settings.txt", "ic-error.log"];
 
-fn walk(
-    root: &Path,
-    cur: &Path,
-    skip: Option<&Path>,
-    out: &mut Vec<(String, PathBuf)>,
-) -> Result<(), String> {
+fn walk(root: &Path, cur: &Path, skip: Option<&Path>, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
     let entries = fs::read_dir(cur).map_err(|e| format!("{}: {e}", cur.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -63,11 +52,7 @@ pub fn collect(project: &Path, runtime: &Path) -> Result<Vec<(String, PathBuf)>,
 }
 
 /// Склеивает runtime + файлы в один exe. Возвращает размер результата в байтах.
-pub fn pack_entries(
-    entries: &[(String, Vec<u8>)],
-    runtime: &Path,
-    out: &Path,
-) -> Result<u64, String> {
+pub fn pack_entries(entries: &[(String, Vec<u8>)], runtime: &Path, out: &Path) -> Result<u64, String> {
     let mut payload: Vec<u8> = Vec::new();
     for (rel, data) in entries {
         payload.extend((rel.len() as u32).to_le_bytes());

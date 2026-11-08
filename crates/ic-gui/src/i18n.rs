@@ -69,6 +69,13 @@ pub enum K {
     SettingsSaved,
     Check,
     CheckHint,
+    OpenHint,
+    SetName,
+    SetNameHint,
+    SetTarget,
+    TargetThis,
+    TargetHint,
+    ErrRename,
     // #запуск и #компиляция
     Run,
     Build,
@@ -111,8 +118,8 @@ pub fn tr(lang: Lang, k: K) -> &'static str {
         K::ErrCreate => pick(lang, "Не удалось создать проект", "Could not create the project"),
         K::IcMissing => pick(
             lang,
-            "Не найден файл ic рядом со Studio. Держи их в одной папке.",
-            "The 'ic' file was not found next to Studio. Keep them in one folder.",
+            "Не удалось определить путь к самой программе.",
+            "Could not determine the path of the program itself.",
         ),
 
         K::Files => pick(lang, "ФАЙЛЫ", "FILES"),
@@ -138,6 +145,26 @@ pub fn tr(lang: Lang, k: K) -> &'static str {
         K::SettingsSaved => pick(lang, "Настройки сохранены в ic.toml", "Settings saved to ic.toml"),
         K::Check => pick(lang, "Проверить", "Check"),
         K::CheckHint => pick(lang, "Проверить Lua-код без запуска", "Check Lua code without running"),
+
+        K::OpenHint => pick(
+            lang,
+            "Чтобы открыть существующий проект, укажи его название и папку — внутри должен лежать файл main.lua.",
+            "To open an existing project, enter its name and folder — it must contain a main.lua file.",
+        ),
+        K::SetName => pick(lang, "Название проекта", "Project name"),
+        K::SetNameHint => pick(
+            lang,
+            "Название проекта — это имя его папки и готового файла. При сохранении папка переименуется.",
+            "The project name is the name of its folder and of the built file. The folder is renamed on save.",
+        ),
+        K::SetTarget => pick(lang, "Собрать для", "Build for"),
+        K::TargetThis => pick(lang, "Эта система", "This system"),
+        K::TargetHint => pick(
+            lang,
+            "Для другой системы положи её файл ic в папку templates рядом с ic (имена: ic-windows.exe, ic-linux, ic-macos).",
+            "For another system, put its ic file into the templates folder next to ic (names: ic-windows.exe, ic-linux, ic-macos).",
+        ),
+        K::ErrRename => pick(lang, "Не удалось переименовать папку", "Could not rename the folder"),
 
         K::Run => pick(lang, "Запустить", "Run"),
         K::Build => pick(lang, "Собрать exe", "Build exe"),

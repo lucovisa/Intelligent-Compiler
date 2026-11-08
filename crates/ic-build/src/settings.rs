@@ -1,5 +1,5 @@
 //! #настройки проекта — файл ic.toml в папке проекта (простой формат `ключ = значение`).
-//! Читают и ic (запуск/сборка), и Studio (окно «Настройки»).
+//! Читают запуск/сборка и окно «Настройки» в приложении IC.
 use std::{fs, path::Path};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -11,17 +11,13 @@ pub struct ProjectSettings {
     pub tick_rate: u32,
     /// Цвет фона окна, sRGB.
     pub background: [u8; 3],
+    /// Платформа сборки: this | windows | linux | macos.
+    pub target: String,
 }
 
 impl Default for ProjectSettings {
     fn default() -> Self {
-        Self {
-            title: "IC Game".into(),
-            width: 1280,
-            height: 720,
-            tick_rate: 60,
-            background: [0x26, 0x26, 0x3F],
-        }
+        Self { title: "IC Game".into(), width: 1280, height: 720, tick_rate: 60, background: [0x26, 0x26, 0x3F], target: "this".into() }
     }
 }
 
@@ -74,6 +70,13 @@ impl ProjectSettings {
                     Some(c) => s.background = c,
                     None => warn.push(format!("ic.toml:{n}: background — цвет вида #rrggbb")),
                 },
+                "target" => {
+                    if ["this", "windows", "linux", "macos"].contains(&v) {
+                        s.target = v.to_string();
+                    } else {
+                        warn.push(format!("ic.toml:{n}: target — this, windows, linux или macos"));
+                    }
+                }
                 _ => warn.push(format!("ic.toml:{n}: неизвестный ключ «{k}»")),
             }
         }
@@ -83,12 +86,13 @@ impl ProjectSettings {
     pub fn to_toml(&self) -> String {
         let [r, g, b] = self.background;
         format!(
-            "# Настройки проекта IC. Меняй здесь или в Studio → Настройки.\n\
-             title = \"{}\"\nwidth = {}\nheight = {}\ntick_rate = {}\nbackground = \"#{r:02x}{g:02x}{b:02x}\"\n",
+            "# Настройки проекта IC. Меняй здесь или в окне IC → «Настройки».\n\
+             title = \"{}\"\nwidth = {}\nheight = {}\ntick_rate = {}\nbackground = \"#{r:02x}{g:02x}{b:02x}\"\ntarget = \"{}\"\n",
             self.title.replace('"', "'"),
             self.width,
             self.height,
-            self.tick_rate
+            self.tick_rate,
+            self.target
         )
     }
 
@@ -108,18 +112,9 @@ impl ProjectSettings {
     pub fn clear_color(&self) -> [f64; 4] {
         let lin = |c: u8| {
             let c = c as f64 / 255.0;
-            if c <= 0.04045 {
-                c / 12.92
-            } else {
-                ((c + 0.055) / 1.055).powf(2.4)
-            }
+            if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
         };
-        [
-            lin(self.background[0]),
-            lin(self.background[1]),
-            lin(self.background[2]),
-            1.0,
-        ]
+        [lin(self.background[0]), lin(self.background[1]), lin(self.background[2]), 1.0]
     }
 }
 
@@ -129,13 +124,7 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let s = ProjectSettings {
-            title: "Моя игра".into(),
-            width: 1920,
-            height: 1080,
-            tick_rate: 120,
-            background: [1, 2, 255],
-        };
+        let s = ProjectSettings { title: "Моя игра".into(), width: 1920, height: 1080, tick_rate: 120, background: [1, 2, 255], target: "windows".into() };
         let (back, warn) = ProjectSettings::parse(&s.to_toml());
         assert_eq!(back, s);
         assert!(warn.is_empty());
@@ -143,8 +132,7 @@ mod tests {
 
     #[test]
     fn warns_but_keeps_defaults() {
-        let (s, warn) =
-            ProjectSettings::parse("widht = 5\nwidth = 10\nbackground = red\n# коммент\n");
+        let (s, warn) = ProjectSettings::parse("widht = 5\nwidth = 10\nbackground = red\n# коммент\n");
         assert_eq!(s, ProjectSettings::default());
         assert_eq!(warn.len(), 3);
     }

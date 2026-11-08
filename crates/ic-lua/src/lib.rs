@@ -69,9 +69,8 @@ fn register_api(lua: &Lua, shared: &Rc<RefCell<Shared>>) -> mlua::Result<()> {
     ic.set(
         "key_down",
         lua.create_function(move |_, name: String| {
-            let k = parse_key(&name).ok_or_else(|| {
-                mlua::Error::RuntimeError(format!("неизвестная клавиша '{name}'"))
-            })?;
+            let k = parse_key(&name)
+                .ok_or_else(|| mlua::Error::RuntimeError(format!("неизвестная клавиша '{name}'")))?;
             Ok(sh.borrow().down[k as usize])
         })?,
     )?;
@@ -80,24 +79,17 @@ fn register_api(lua: &Lua, shared: &Rc<RefCell<Shared>>) -> mlua::Result<()> {
     ic.set(
         "key_pressed",
         lua.create_function(move |_, name: String| {
-            let k = parse_key(&name).ok_or_else(|| {
-                mlua::Error::RuntimeError(format!("неизвестная клавиша '{name}'"))
-            })?;
+            let k = parse_key(&name)
+                .ok_or_else(|| mlua::Error::RuntimeError(format!("неизвестная клавиша '{name}'")))?;
             Ok(sh.borrow().pressed[k as usize])
         })?,
     )?;
 
     let sh = shared.clone();
-    ic.set(
-        "screen",
-        lua.create_function(move |_, ()| Ok(sh.borrow().screen))?,
-    )?;
+    ic.set("screen", lua.create_function(move |_, ()| Ok(sh.borrow().screen))?)?;
 
     let sh = shared.clone();
-    ic.set(
-        "time",
-        lua.create_function(move |_, ()| Ok(sh.borrow().elapsed))?,
-    )?;
+    ic.set("time", lua.create_function(move |_, ()| Ok(sh.borrow().elapsed))?)?;
 
     let sh = shared.clone();
     ic.set(
@@ -126,16 +118,11 @@ fn install_embedded_searcher(lua: &Lua, files: Rc<HashMap<String, Vec<u8>>>) -> 
         let base = name.replace('.', "/");
         for path in [format!("{base}.lua"), format!("{base}/init.lua")] {
             if let Some(src) = files.get(&path) {
-                let f = lua
-                    .load(src.as_slice())
-                    .set_name(format!("@{path}"))
-                    .into_function()?;
+                let f = lua.load(src.as_slice()).set_name(format!("@{path}")).into_function()?;
                 return Ok(Value::Function(f));
             }
         }
-        Ok(Value::String(lua.create_string(format!(
-            "\n\tнет встроенного модуля '{name}'"
-        ))?))
+        Ok(Value::String(lua.create_string(format!("\n\tнет встроенного модуля '{name}'"))?))
     })?;
     let package: Table = lua.globals().get("package")?;
     let searchers: Table = package.get("searchers")?;
@@ -146,19 +133,8 @@ fn install_embedded_searcher(lua: &Lua, files: Rc<HashMap<String, Vec<u8>>>) -> 
 // #компиляция — проверка Lua-кода без запуска игры
 
 /// Имена, которые движок даёт в таблице `ic` (функции + колбэки + настройки).
-const API: [&str; 11] = [
-    "rect",
-    "key_down",
-    "key_pressed",
-    "screen",
-    "time",
-    "camera",
-    "quit",
-    "title",
-    "load",
-    "update",
-    "fixed_update",
-];
+const API: [&str; 11] =
+    ["rect", "key_down", "key_pressed", "screen", "time", "camera", "quit", "title", "load", "update", "fixed_update"];
 
 #[derive(Clone, Debug)]
 pub struct Diagnostic {
@@ -175,16 +151,9 @@ pub fn check_sources(files: &[(String, Vec<u8>)]) -> Vec<Diagnostic> {
         if !path.ends_with(".lua") {
             continue;
         }
-        match lua
-            .load(data.as_slice())
-            .set_name(format!("@{path}"))
-            .into_function()
-        {
+        match lua.load(data.as_slice()).set_name(format!("@{path}")).into_function() {
             Ok(_) => out.extend(api_warnings(path, &String::from_utf8_lossy(data))),
-            Err(e) => out.push(Diagnostic {
-                is_error: true,
-                message: e.to_string(),
-            }),
+            Err(e) => out.push(Diagnostic { is_error: true, message: e.to_string() }),
         }
     }
     out
@@ -254,16 +223,20 @@ fn api_warnings(path: &str, src: &str) -> Vec<Diagnostic> {
         .filter(|(_, n)| !API.contains(&n.as_str()) && !defined.contains(n))
         .map(|(pos, n)| {
             let line = src[..pos].matches('\n').count() + 1;
-            Diagnostic {
-                is_error: false,
-                message: format!("{path}:{line}: неизвестная функция ic.{n} (опечатка?)"),
-            }
+            Diagnostic { is_error: false, message: format!("{path}:{line}: неизвестная функция ic.{n} (опечатка?)") }
         })
         .collect()
 }
 
+
 fn fatal(msg: &str) {
     eprintln!("\n[IC] Ошибка в Lua-скрипте:\n{msg}\n\nНажми Enter, чтобы закрыть...");
+    if cfg!(windows) {
+        // без консоли ошибку иначе не увидеть — пишем рядом с программой
+        if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
+            let _ = std::fs::write(dir.join("ic-error.log"), msg);
+        }
+    }
     let mut s = String::new();
     let _ = std::io::stdin().read_line(&mut s);
 }
@@ -291,61 +264,31 @@ impl LuaGame {
             .unwrap_or_else(|| Path::new("."));
         let package: Table = lua.globals().get("package").map_err(|e| e.to_string())?;
         package
-            .set(
-                "path",
-                format!("{d}/?.lua;{d}/?/init.lua", d = dir.display()),
-            )
+            .set("path", format!("{d}/?.lua;{d}/?/init.lua", d = dir.display()))
             .map_err(|e| e.to_string())?;
 
-        let name = format!(
-            "@{}",
-            script
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("main.lua")
-        );
-        lua.load(src.as_str())
-            .set_name(name)
-            .exec()
-            .map_err(|e| e.to_string())?;
+        let name = format!("@{}", script.file_name().and_then(|s| s.to_str()).unwrap_or("main.lua"));
+        lua.load(src.as_str()).set_name(name).exec().map_err(|e| e.to_string())?;
 
-        Ok(Self {
-            lua,
-            shared,
-            dead: false,
-        })
+        Ok(Self { lua, shared, dead: false })
     }
 
     /// Загружает игру из файлов, вшитых в собранный exe (см. ic-build).
     pub fn from_files(files: HashMap<String, Vec<u8>>) -> Result<Self, String> {
-        let main = files
-            .get("main.lua")
-            .cloned()
-            .ok_or_else(|| "в сборке нет main.lua".to_string())?;
+        let main = files.get("main.lua").cloned().ok_or_else(|| "в сборке нет main.lua".to_string())?;
 
         let lua = Lua::new();
         let shared = Rc::new(RefCell::new(Shared::default()));
         register_api(&lua, &shared).map_err(|e| e.to_string())?;
         install_embedded_searcher(&lua, Rc::new(files)).map_err(|e| e.to_string())?;
-        lua.load(main.as_slice())
-            .set_name("@main.lua")
-            .exec()
-            .map_err(|e| e.to_string())?;
+        lua.load(main.as_slice()).set_name("@main.lua").exec().map_err(|e| e.to_string())?;
 
-        Ok(Self {
-            lua,
-            shared,
-            dead: false,
-        })
+        Ok(Self { lua, shared, dead: false })
     }
 
     /// Заголовок, если игра задала `ic.title` (иначе берём из ic.toml).
     pub fn title_opt(&self) -> Option<String> {
-        self.lua
-            .globals()
-            .get::<Table>("ic")
-            .ok()
-            .and_then(|t| t.get::<String>("title").ok())
+        self.lua.globals().get::<Table>("ic").ok().and_then(|t| t.get::<String>("title").ok())
     }
 
     /// Заголовок окна из `ic.title` (или «IC Game»).
@@ -380,12 +323,8 @@ impl LuaGame {
         if self.dead {
             return;
         }
-        let Ok(ic) = self.lua.globals().get::<Table>("ic") else {
-            return;
-        };
-        let Ok(f) = ic.get::<Function>(name) else {
-            return;
-        };
+        let Ok(ic) = self.lua.globals().get::<Table>("ic") else { return };
+        let Ok(f) = ic.get::<Function>(name) else { return };
 
         self.sync_in(ctx);
         let res = match dt {
@@ -477,8 +416,7 @@ mod check_tests {
 
     #[test]
     fn unknown_api_call_is_a_warning() {
-        let d =
-            one("function ic.update(dt)\n  ic.rectt(0,0,1,1,1,1,1)\n  ic.rect(0,0,1,1,1,1,1)\nend");
+        let d = one("function ic.update(dt)\n  ic.rectt(0,0,1,1,1,1,1)\n  ic.rect(0,0,1,1,1,1,1)\nend");
         assert_eq!(d.len(), 1);
         assert!(!d[0].is_error);
         assert!(d[0].message.contains("ic.rectt") && d[0].message.contains(":2:"));
