@@ -74,7 +74,10 @@ fn die(msg: &str) -> ! {
     eprintln!("[IC] {msg}\n\nНажми Enter, чтобы закрыть...");
     if cfg!(windows) {
         // без консоли ошибку иначе не увидеть — пишем рядом с программой
-        if let Some(dir) = env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        if let Some(dir) = env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(Path::to_path_buf))
+        {
             let _ = fs::write(dir.join("ic-error.log"), msg);
         }
     }
@@ -115,14 +118,22 @@ fn init_lua(dir: &Path) {
         .ok()
         .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "IC Game".to_string());
-    let settings = ic_build::ProjectSettings { title, ..Default::default() };
-    or_die(write_if_absent(&dir.join(ic_build::ProjectSettings::FILE), &settings.to_toml()));
+    let settings = ic_build::ProjectSettings {
+        title,
+        ..Default::default()
+    };
+    or_die(write_if_absent(
+        &dir.join(ic_build::ProjectSettings::FILE),
+        &settings.to_toml(),
+    ));
     println!("Запуск: ic {}", dir.display());
 }
 
 fn init_rust(dir: &Path) {
     let raw = if dir == Path::new(".") {
-        env::current_dir().ok().and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+        env::current_dir()
+            .ok()
+            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
     } else {
         dir.file_name().map(|n| n.to_string_lossy().into_owned())
     };
@@ -155,7 +166,8 @@ fn setup_menu() {
     match ask("Выбор [1]: ").as_str() {
         "2" => {
             init_rust(Path::new("."));
-            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y") {
+            if ask("Скачать Rust сейчас в ./.ic/ ? [y/N]: ").eq_ignore_ascii_case("y")
+            {
                 or_die(rust_mode::setup(Path::new(".")));
             } else {
                 println!("Позже: ic rust setup");
@@ -184,10 +196,12 @@ fn resolve(arg: &str) -> PathBuf {
     die(&format!("не найдено: {arg}"))
 }
 
-
 fn start(script: PathBuf) {
     // рабочая папка = папка игры, чтобы относительные пути (assets/…) работали
-    let file = script.file_name().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("main.lua"));
+    let file = script
+        .file_name()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("main.lua"));
     if let Some(dir) = script.parent().filter(|d| !d.as_os_str().is_empty()) {
         if let Err(e) = env::set_current_dir(dir) {
             die(&format!("не могу открыть папку игры: {e}"));
@@ -204,13 +218,27 @@ fn start(script: PathBuf) {
 
 /// ic.toml + (необязательно) `ic.title` из Lua → Config движка. Lua-название главнее.
 fn make_config(s: &ic_build::ProjectSettings, lua_title: Option<String>) -> Config {
-    let title: &'static str = Box::leak(lua_title.unwrap_or_else(|| s.title.clone()).into_boxed_str());
-    Config { title, width: s.width, height: s.height, tick_rate: s.tick_rate, clear_color: s.clear_color(), ..Default::default() }
+    let title: &'static str = Box::leak(
+        lua_title
+            .unwrap_or_else(|| s.title.clone())
+            .into_boxed_str(),
+    );
+    Config {
+        title,
+        width: s.width,
+        height: s.height,
+        tick_rate: s.tick_rate,
+        clear_color: s.clear_color(),
+        ..Default::default()
+    }
 }
 
 /// Кэши шейдеров драйверов (Mesa / NVIDIA) по умолчанию лежат в ~/.cache — переносим рядом с ic.
 fn confine_caches() {
-    if let Some(dir) = env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
         let cache = dir.join("cache");
         let _ = fs::create_dir_all(&cache);
         let set = |k: &str, v: &std::ffi::OsStr| {
@@ -222,7 +250,10 @@ fn confine_caches() {
         set("__GL_SHADER_DISK_CACHE_PATH", cache.as_os_str());
         // потолок размера кэша: драйвер сам вытесняет старое
         set("MESA_SHADER_CACHE_MAX_SIZE", std::ffi::OsStr::new("256M"));
-        set("__GL_SHADER_DISK_CACHE_SIZE", std::ffi::OsStr::new("268435456"));
+        set(
+            "__GL_SHADER_DISK_CACHE_SIZE",
+            std::ffi::OsStr::new("268435456"),
+        );
     }
 }
 
@@ -232,7 +263,15 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
     let t0 = Instant::now();
     let total = if pack { 4 } else { 3 };
     let runtime = or_die(env::current_exe().map_err(|e| e.to_string()));
-    println!("[IC] {}: {}", if pack { "Сборка" } else { "Проверка" }, dir.display());
+    println!(
+        "[IC] {}: {}",
+        if pack {
+            "Сборка"
+        } else {
+            "Проверка"
+        },
+        dir.display()
+    );
 
     if !dir.join("main.lua").is_file() {
         println!("[IC] Ошибка: в {} нет main.lua", dir.display());
@@ -246,14 +285,25 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
         let data = or_die(fs::read(path).map_err(|e| format!("{}: {e}", path.display())));
         entries.push((rel.clone(), data));
     }
-    println!("[1/{total}] Читаю проект ........ файлов: {}", entries.len());
+    println!(
+        "[1/{total}] Читаю проект ........ файлов: {}",
+        entries.len()
+    );
 
     // 2. разбор Lua (настоящий компилятор Lua: ошибки синтаксиса с номером строки)
     let (proj_settings, toml_warnings) = ic_build::ProjectSettings::load(dir);
     let diags = ic_lua::check_sources(&entries);
     let errors = diags.iter().filter(|d| d.is_error).count();
     for d in &diags {
-        println!("  {}: {}", if d.is_error { "ошибка" } else { "предупреждение" }, d.message);
+        println!(
+            "  {}: {}",
+            if d.is_error {
+                "ошибка"
+            } else {
+                "предупреждение"
+            },
+            d.message
+        );
     }
     for w in &toml_warnings {
         println!("  предупреждение: {w}");
@@ -279,12 +329,20 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
         .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "game".to_string());
     // какую платформу собираем: из --target, иначе из ic.toml
-    let target_name = target.map(str::to_string).unwrap_or_else(|| proj_settings.target.clone());
+    let target_name = target
+        .map(str::to_string)
+        .unwrap_or_else(|| proj_settings.target.clone());
     let (pack_runtime, ext) = or_die(resolve_runtime(&target_name));
     let file = format!("{name}{ext}");
-    let out = out.map(Path::to_path_buf).unwrap_or_else(|| dir.join("build").join(file));
+    let out = out
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| dir.join("build").join(file));
     let size = or_die(ic_build::pack_entries(&entries, &pack_runtime, &out));
-    println!("[4/{total}] Упаковываю .......... {} ({:.1} МБ)", out.display(), size as f64 / 1_048_576.0);
+    println!(
+        "[4/{total}] Упаковываю .......... {} ({:.1} МБ)",
+        out.display(),
+        size as f64 / 1_048_576.0
+    );
     println!("[IC] Готово за {:.2} с", t0.elapsed().as_secs_f32());
 }
 
@@ -322,9 +380,15 @@ fn host_os() -> &'static str {
 /// Для своей системы это сама программа, для чужой — файл из папки templates рядом с ней.
 fn resolve_runtime(target: &str) -> Result<(PathBuf, &'static str), String> {
     let host = host_os();
-    let t = if target.is_empty() || target == "this" { host } else { target };
+    let t = if target.is_empty() || target == "this" {
+        host
+    } else {
+        target
+    };
     if !["windows", "linux", "macos"].contains(&t) {
-        return Err(format!("неизвестная платформа «{t}» (windows, linux, macos)"));
+        return Err(format!(
+            "неизвестная платформа «{t}» (windows, linux, macos)"
+        ));
     }
     let ext = if t == "windows" { ".exe" } else { "" };
     let me = env::current_exe().map_err(|e| e.to_string())?;
@@ -336,7 +400,10 @@ fn resolve_runtime(target: &str) -> Result<(PathBuf, &'static str), String> {
     if p.is_file() {
         Ok((p, ext))
     } else {
-        Err(format!("нет шаблона {} — положи туда файл ic для {t} (из релиза для этой системы)", p.display()))
+        Err(format!(
+            "нет шаблона {} — положи туда файл ic для {t} (из релиза для этой системы)",
+            p.display()
+        ))
     }
 }
 
@@ -348,7 +415,10 @@ fn main() {
     confine_caches();
 
     // собранная игра: внутри этого exe уже лежат скрипты — просто запускаем их
-    if let Some(files) = env::current_exe().ok().and_then(|e| ic_build::read_embedded(&e)) {
+    if let Some(files) = env::current_exe()
+        .ok()
+        .and_then(|e| ic_build::read_embedded(&e))
+    {
         let settings = files
             .get(ic_build::ProjectSettings::FILE)
             .map(|b| ic_build::ProjectSettings::parse(&String::from_utf8_lossy(b)).0)

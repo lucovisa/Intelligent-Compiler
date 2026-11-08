@@ -61,7 +61,12 @@ pub fn run<G: Game + 'static>(game: G, cfg: Config) {
                     engine.ctx.screen_size = Vec2::new(s.width as f32, s.height as f32);
                 }
                 WindowEvent::KeyboardInput {
-                    event: KeyEvent { physical_key: PhysicalKey::Code(code), state, .. },
+                    event:
+                        KeyEvent {
+                            physical_key: PhysicalKey::Code(code),
+                            state,
+                            ..
+                        },
                     ..
                 } => {
                     if let Some(k) = map_key(code) {
