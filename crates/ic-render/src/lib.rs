@@ -1,5 +1,3 @@
-//! Окно + GPU (winit + wgpu) поверх ic-core.
-//! Пользователю достаточно одной зависимости: `ic-render` реэкспортирует всё ядро.
 pub use ic_core::*;
 
 mod renderer;
@@ -31,7 +29,6 @@ fn map_key(code: KeyCode) -> Option<Key> {
     })
 }
 
-/// Запуск игры в окне.
 pub fn run<G: Game + 'static>(game: G, cfg: Config) {
     let event_loop = EventLoop::new().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -61,12 +58,7 @@ pub fn run<G: Game + 'static>(game: G, cfg: Config) {
                     engine.ctx.screen_size = Vec2::new(s.width as f32, s.height as f32);
                 }
                 WindowEvent::KeyboardInput {
-                    event:
-                        KeyEvent {
-                            physical_key: PhysicalKey::Code(code),
-                            state,
-                            ..
-                        },
+                    event: KeyEvent { physical_key: PhysicalKey::Code(code), state, .. },
                     ..
                 } => {
                     if let Some(k) = map_key(code) {

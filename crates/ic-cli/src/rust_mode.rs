@@ -1,6 +1,3 @@
-//! Режим Б (по желанию): игры на Rust. Компилятор качается ЛОКАЛЬНО в `./.ic/`
-//! (RUSTUP_HOME / CARGO_HOME указаны туда), глобальные настройки и PATH не трогаем.
-//! Внешние зависимости — только `curl` и `tar` (есть в Windows 10+, Linux, macOS).
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -10,63 +7,37 @@ use std::{
 const ZIG_VERSION: &str = "0.13.0";
 
 fn exe(name: &str) -> String {
-    if cfg!(windows) {
-        format!("{name}.exe")
-    } else {
-        name.to_string()
-    }
+    if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
 }
 
 fn absolute(p: &Path) -> Result<PathBuf, String> {
     if p.is_absolute() {
         Ok(p.to_path_buf())
     } else {
-        env::current_dir()
-            .map(|c| c.join(p))
-            .map_err(|e| e.to_string())
+        env::current_dir().map(|c| c.join(p)).map_err(|e| e.to_string())
     }
 }
 
 fn run_ok(cmd: &mut Command, what: &str) -> Result<(), String> {
-    let status = cmd
-        .status()
-        .map_err(|e| format!("{what}: не удалось запустить ({e})"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("{what}: ошибка ({status})"))
-    }
+    let status = cmd.status().map_err(|e| format!("{what}: не удалось запустить ({e})"))?;
+    if status.success() { Ok(()) } else { Err(format!("{what}: ошибка ({status})")) }
 }
 
 fn download(url: &str, to: &Path) -> Result<(), String> {
     run_ok(
-        Command::new("curl")
-            .args(["-fL", "--proto", "=https", "--tlsv1.2", "-o"])
-            .arg(to)
-            .arg(url),
+        Command::new("curl").args(["-fL", "--proto", "=https", "--tlsv1.2", "-o"]).arg(to).arg(url),
         &format!("скачивание {url}"),
     )
 }
 
-/// Windows: линкер-обёртка на локальном Zig (чтобы не требовать Visual Studio Build Tools).
 fn setup_zig(ic: &Path) -> Result<(), String> {
     let zig_dir = ic.join("zig");
     if !zig_dir.join("zig.exe").exists() {
         let archive = ic.join("zig.zip");
         let name = format!("zig-windows-x86_64-{ZIG_VERSION}");
         println!("Скачиваю Zig (линкер) в {} ...", zig_dir.display());
-        download(
-            &format!("https://ziglang.org/download/{ZIG_VERSION}/{name}.zip"),
-            &archive,
-        )?;
-        run_ok(
-            Command::new("tar")
-                .arg("-xf")
-                .arg(&archive)
-                .arg("-C")
-                .arg(ic),
-            "распаковка Zig",
-        )?;
+        download(&format!("https://ziglang.org/download/{ZIG_VERSION}/{name}.zip"), &archive)?;
+        run_ok(Command::new("tar").arg("-xf").arg(&archive).arg("-C").arg(ic), "распаковка Zig")?;
         fs::rename(ic.join(&name), &zig_dir).map_err(|e| e.to_string())?;
         let _ = fs::remove_file(&archive);
     }
@@ -77,7 +48,6 @@ fn setup_zig(ic: &Path) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-/// Скачивает Rust (+ линкер на Windows) в `<project>/.ic/`.
 pub fn setup(project: &Path) -> Result<(), String> {
     if !cfg!(windows) && Command::new("cc").arg("--version").output().is_err() {
         return Err("нужен C-компилятор (cc). Linux: поставь gcc/build-essential, macOS: xcode-select --install".into());
@@ -92,14 +62,7 @@ pub fn setup(project: &Path) -> Result<(), String> {
         println!("Rust уже установлен в {}", ic.display());
     } else {
         println!("Скачиваю Rust (официальный rustup) в {} ...", ic.display());
-        let args = [
-            "-y",
-            "--no-modify-path",
-            "--profile",
-            "minimal",
-            "--default-toolchain",
-            "stable",
-        ];
+        let args = ["-y", "--no-modify-path", "--profile", "minimal", "--default-toolchain", "stable"];
         if cfg!(windows) {
             let init = ic.join("rustup-init.exe");
             download("https://win.rustup.rs/x86_64", &init)?;
@@ -140,7 +103,6 @@ pub fn setup(project: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Запускает cargo из локальной установки.
 pub fn cargo(project: &Path, args: &[&str]) -> Result<(), String> {
     let root = absolute(project)?;
     let ic = root.join(".ic");

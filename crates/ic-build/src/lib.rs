@@ -1,8 +1,8 @@
-//! «Компилятор» IC: собирает игру в ОДИН самостоятельный исполняемый файл.
-//!
-//! Формат: [байты runtime `ic`][payload][u64 длина payload][магия "ICGAME01"]
-//! payload = последовательность файлов: u32 длина пути, путь, u64 длина данных, данные.
-//! Только std, без внешних зависимостей.
+mod settings;
+pub mod scaffold;
+
+pub use settings::ProjectSettings;
+
 use std::{
     collections::HashMap,
     fs,
@@ -10,19 +10,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-mod settings;
-pub use settings::ProjectSettings;
-
 const MAGIC: &[u8; 8] = b"ICGAME01";
 const SKIP_DIRS: [&str; 5] = [".ic", "target", ".git", "build", ".cargo"];
 const SKIP_FILES: &[&str] = &["ic", "ic.exe", "ic-settings.txt", "ic-error.log"];
 
-fn walk(
-    root: &Path,
-    cur: &Path,
-    skip: Option<&Path>,
-    out: &mut Vec<(String, PathBuf)>,
-) -> Result<(), String> {
+fn walk(root: &Path, cur: &Path, skip: Option<&Path>, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
     let entries = fs::read_dir(cur).map_err(|e| format!("{}: {e}", cur.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -48,7 +40,6 @@ fn walk(
     Ok(())
 }
 
-/// Файлы проекта (без служебных папок и самого runtime): (путь внутри архива, путь на диске).
 pub fn collect(project: &Path, runtime: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     let runtime_canon = fs::canonicalize(runtime).ok();
     let mut files = Vec::new();
@@ -56,12 +47,7 @@ pub fn collect(project: &Path, runtime: &Path) -> Result<Vec<(String, PathBuf)>,
     Ok(files)
 }
 
-/// Склеивает runtime + файлы в один exe. Возвращает размер результата в байтах.
-pub fn pack_entries(
-    entries: &[(String, Vec<u8>)],
-    runtime: &Path,
-    out: &Path,
-) -> Result<u64, String> {
+pub fn write_game(entries: &[(String, Vec<u8>)], runtime: &[u8], out: &Path) -> Result<u64, String> {
     let mut payload: Vec<u8> = Vec::new();
     for (rel, data) in entries {
         payload.extend((rel.len() as u32).to_le_bytes());
@@ -70,7 +56,8 @@ pub fn pack_entries(
         payload.extend(data);
     }
 
-    let mut exe = fs::read(runtime).map_err(|e| format!("{}: {e}", runtime.display()))?;
+    let mut exe: Vec<u8> = Vec::with_capacity(runtime.len() + payload.len() + 16);
+    exe.extend(runtime);
     exe.extend(&payload);
     exe.extend((payload.len() as u64).to_le_bytes());
     exe.extend(MAGIC);
@@ -88,7 +75,11 @@ pub fn pack_entries(
     Ok(exe.len() as u64)
 }
 
-/// Собирает `project` + `runtime` в файл `out`. Возвращает число упакованных файлов.
+pub fn pack_entries(entries: &[(String, Vec<u8>)], runtime: &Path, out: &Path) -> Result<u64, String> {
+    let rt = fs::read(runtime).map_err(|e| format!("{}: {e}", runtime.display()))?;
+    write_game(entries, &rt, out)
+}
+
 pub fn pack(project: &Path, runtime: &Path, out: &Path) -> Result<usize, String> {
     if !project.join("main.lua").is_file() {
         return Err(format!("в {} нет main.lua", project.display()));
@@ -102,7 +93,6 @@ pub fn pack(project: &Path, runtime: &Path, out: &Path) -> Result<usize, String>
     Ok(entries.len())
 }
 
-/// Если в конце `exe` лежит игра — возвращает её файлы (путь -> данные).
 pub fn read_embedded(exe: &Path) -> Option<HashMap<String, Vec<u8>>> {
     let mut f = fs::File::open(exe).ok()?;
     let total = f.metadata().ok()?.len();
@@ -162,6 +152,17 @@ mod tests {
         assert!(files.contains_key("lib/util.lua"));
         assert!(read_embedded(&runtime).is_none());
 
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn write_game_with_embedded_runtime_bytes() {
+        let base = std::env::temp_dir().join(format!("ic_build_bytes_{}", std::process::id()));
+        let out = base.join("g.bin");
+        let entries = vec![("main.lua".to_string(), b"x = 1".to_vec())];
+        let size = write_game(&entries, b"RT", &out).unwrap();
+        assert_eq!(size, fs::metadata(&out).unwrap().len());
+        assert_eq!(read_embedded(&out).unwrap()["main.lua"], b"x = 1".to_vec());
         let _ = fs::remove_dir_all(&base);
     }
 

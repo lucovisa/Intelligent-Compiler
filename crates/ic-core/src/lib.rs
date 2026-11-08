@@ -1,4 +1,3 @@
-//! IC (Intelligent Compiler) — ядро движка. Без GPU/окна: легко тестируется в CI.
 pub mod math;
 pub use math::{Vec2, Vec3};
 
@@ -6,26 +5,16 @@ use std::time::{Duration, Instant};
 
 pub struct Config {
     pub title: &'static str,
-    /// Частота fixed_update (физика/логика), Гц.
     pub tick_rate: u32,
-    /// Для тестов: остановиться после N кадров (headless).
     pub max_frames: Option<u64>,
     pub clear_color: [f64; 4],
-    /// Размер окна (логические пиксели).
     pub width: u32,
     pub height: u32,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            title: "IC Game",
-            tick_rate: 60,
-            max_frames: None,
-            clear_color: [0.02, 0.02, 0.05, 1.0],
-            width: 1280,
-            height: 720,
-        }
+        Self { title: "IC Game", tick_rate: 60, max_frames: None, clear_color: [0.02, 0.02, 0.05, 1.0], width: 1280, height: 720 }
     }
 }
 
@@ -38,34 +27,13 @@ pub struct Time {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Key {
-    Left,
-    Right,
-    Up,
-    Down,
-    W,
-    A,
-    S,
-    D,
-    Space,
-    Escape,
-    Enter,
-}
+pub enum Key { Left, Right, Up, Down, W, A, S, D, Space, Escape, Enter }
 pub const KEY_COUNT: usize = 11;
 
 impl Key {
     pub const ALL: [Key; KEY_COUNT] = [
-        Key::Left,
-        Key::Right,
-        Key::Up,
-        Key::Down,
-        Key::W,
-        Key::A,
-        Key::S,
-        Key::D,
-        Key::Space,
-        Key::Escape,
-        Key::Enter,
+        Key::Left, Key::Right, Key::Up, Key::Down, Key::W, Key::A,
+        Key::S, Key::D, Key::Space, Key::Escape, Key::Enter,
     ];
 }
 
@@ -76,25 +44,16 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn is_down(&self, k: Key) -> bool {
-        self.down[k as usize]
-    }
-    pub fn just_pressed(&self, k: Key) -> bool {
-        self.pressed[k as usize]
-    }
+    pub fn is_down(&self, k: Key) -> bool { self.down[k as usize] }
+    pub fn just_pressed(&self, k: Key) -> bool { self.pressed[k as usize] }
     pub fn set(&mut self, k: Key, is_down: bool) {
         let i = k as usize;
-        if is_down && !self.down[i] {
-            self.pressed[i] = true;
-        }
+        if is_down && !self.down[i] { self.pressed[i] = true; }
         self.down[i] = is_down;
     }
-    pub fn end_frame(&mut self) {
-        self.pressed = [false; KEY_COUNT];
-    }
+    pub fn end_frame(&mut self) { self.pressed = [false; KEY_COUNT]; }
 }
 
-/// Цветной (пока без текстур) спрайт. Координаты — мировые, Y вверх.
 #[derive(Clone, Copy, Debug)]
 pub struct Sprite {
     pub pos: Vec2,
@@ -109,35 +68,20 @@ pub struct DrawList {
 }
 
 impl DrawList {
-    pub fn clear(&mut self) {
-        self.sprites.clear();
-    }
-    pub fn sprite(&mut self, s: Sprite) {
-        self.sprites.push(s);
-    }
+    pub fn clear(&mut self) { self.sprites.clear(); }
+    pub fn sprite(&mut self, s: Sprite) { self.sprites.push(s); }
     pub fn rect(&mut self, pos: Vec2, size: Vec2, color: [f32; 4]) {
-        self.sprites.push(Sprite {
-            pos,
-            size,
-            rotation: 0.0,
-            color,
-        });
+        self.sprites.push(Sprite { pos, size, rotation: 0.0, color });
     }
 }
 
-/// `height` — сколько мировых единиц видно по вертикали.
 pub struct Camera2D {
     pub center: Vec2,
     pub height: f32,
 }
 
 impl Default for Camera2D {
-    fn default() -> Self {
-        Self {
-            center: Vec2::ZERO,
-            height: 720.0,
-        }
-    }
+    fn default() -> Self { Self { center: Vec2::ZERO, height: 720.0 } }
 }
 
 #[derive(Default)]
@@ -151,22 +95,16 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn quit(&mut self) {
-        self.quit = true;
-    }
+    pub fn quit(&mut self) { self.quit = true; }
 }
 
-/// Всё, что реализует пользователь движка.
 pub trait Game {
     fn init(&mut self, _ctx: &mut Context) {}
-    /// Постоянный шаг `time.fixed_delta`.
     fn fixed_update(&mut self, _ctx: &mut Context) {}
-    /// Каждый кадр. Здесь же добавляй спрайты в `ctx.draw`.
     fn update(&mut self, ctx: &mut Context);
     fn shutdown(&mut self, _ctx: &mut Context) {}
 }
 
-/// Шаговая машина движка. Её используют и headless `run`, и оконный рендер.
 pub struct Engine<G: Game> {
     pub game: G,
     pub ctx: Context,
@@ -183,14 +121,7 @@ impl<G: Game> Engine<G> {
         ctx.time.fixed_delta = fixed;
         ctx.screen_size = Vec2::new(1280.0, 720.0);
         let now = Instant::now();
-        Self {
-            game,
-            ctx,
-            fixed,
-            acc: 0.0,
-            start: now,
-            last: now,
-        }
+        Self { game, ctx, fixed, acc: 0.0, start: now, last: now }
     }
 
     pub fn start(&mut self) {
@@ -202,7 +133,6 @@ impl<G: Game> Engine<G> {
 
     pub fn frame(&mut self) {
         let now = Instant::now();
-        // clamp защищает от «спирали смерти» после лагов
         let dt = (now - self.last).as_secs_f32().min(0.25);
         self.last = now;
         self.ctx.time.delta = dt;
@@ -220,16 +150,11 @@ impl<G: Game> Engine<G> {
         self.ctx.input.end_frame();
     }
 
-    pub fn should_quit(&self) -> bool {
-        self.ctx.quit
-    }
+    pub fn should_quit(&self) -> bool { self.ctx.quit }
 
-    pub fn shutdown(&mut self) {
-        self.game.shutdown(&mut self.ctx);
-    }
+    pub fn shutdown(&mut self) { self.game.shutdown(&mut self.ctx); }
 }
 
-/// Headless-цикл (без окна) — для тестов и серверов.
 pub fn run<G: Game>(game: G, cfg: Config) {
     let mut e = Engine::new(game, cfg.tick_rate);
     e.start();
@@ -248,9 +173,7 @@ pub fn run<G: Game>(game: G, cfg: Config) {
 mod tests {
     use super::*;
 
-    struct Counter {
-        frames: u32,
-    }
+    struct Counter { frames: u32 }
     impl Game for Counter {
         fn update(&mut self, ctx: &mut Context) {
             self.frames += 1;
@@ -262,11 +185,9 @@ mod tests {
     fn engine_counts_frames() {
         let mut e = Engine::new(Counter { frames: 0 }, 60);
         e.start();
-        for _ in 0..10 {
-            e.frame();
-        }
+        for _ in 0..10 { e.frame(); }
         assert_eq!(e.game.frames, 10);
-        assert_eq!(e.ctx.draw.sprites.len(), 1); // draw очищается каждый кадр
+        assert_eq!(e.ctx.draw.sprites.len(), 1);
     }
 
     #[test]

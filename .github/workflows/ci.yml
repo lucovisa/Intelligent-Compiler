@@ -61,14 +61,17 @@ jobs:
       - name: Linux libs
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev libx11-dev
-      - run: cargo build --release --workspace
+      - name: Build runtime
+        run: cargo build --release -p ic-runtime
+      - name: Build app
+        env:
+          IC_RUNTIME: target/release/ic-runtime${{ matrix.ext }}
+        run: cargo build --release -p ic-cli
       - name: Package
         shell: bash
         run: |
           mkdir -p pkg dist
           cp target/release/ic${{ matrix.ext }} pkg/
-          mkdir -p pkg/projects/demo
-          cp examples/demo/* pkg/projects/demo/
           if [ "$RUNNER_OS" = "Windows" ]; then
             (cd pkg && 7z a ../dist/ic-${{ matrix.name }}.zip .)
           else

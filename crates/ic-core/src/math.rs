@@ -1,4 +1,3 @@
-//! Минимальная математика для 2D/3D. Позже заменим/дополним SIMD-версией.
 use std::ops::{Add, AddAssign, Mul, Sub};
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -16,29 +15,15 @@ pub struct Vec3 {
 
 impl Vec2 {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
-    pub const fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-    pub fn dot(self, o: Self) -> f32 {
-        self.x * o.x + self.y * o.y
-    }
-    pub fn length(self) -> f32 {
-        self.dot(self).sqrt()
-    }
+    pub const fn new(x: f32, y: f32) -> Self { Self { x, y } }
+    pub fn dot(self, o: Self) -> f32 { self.x * o.x + self.y * o.y }
+    pub fn length(self) -> f32 { self.dot(self).sqrt() }
 }
 
 impl Vec3 {
-    pub const ZERO: Self = Self {
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-    };
-    pub const fn new(x: f32, y: f32, z: f32) -> Self {
-        Self { x, y, z }
-    }
-    pub fn dot(self, o: Self) -> f32 {
-        self.x * o.x + self.y * o.y + self.z * o.z
-    }
+    pub const ZERO: Self = Self { x: 0.0, y: 0.0, z: 0.0 };
+    pub const fn new(x: f32, y: f32, z: f32) -> Self { Self { x, y, z } }
+    pub fn dot(self, o: Self) -> f32 { self.x * o.x + self.y * o.y + self.z * o.z }
     pub fn cross(self, o: Self) -> Self {
         Self::new(
             self.y * o.z - self.z * o.y,
@@ -46,9 +31,7 @@ impl Vec3 {
             self.x * o.y - self.y * o.x,
         )
     }
-    pub fn length(self) -> f32 {
-        self.dot(self).sqrt()
-    }
+    pub fn length(self) -> f32 { self.dot(self).sqrt() }
 }
 
 macro_rules! impl_ops {

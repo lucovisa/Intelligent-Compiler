@@ -1,7 +1,3 @@
-//! #локализация — тексты интерфейса.
-//! Добавить язык = добавить вариант в `Lang` и третий аргумент в каждый `pick`.
-//! Ключ без перевода не соберётся: `match` по `K` без `_`.
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
     Ru,
@@ -32,12 +28,10 @@ impl Lang {
 
 #[derive(Clone, Copy)]
 pub enum K {
-    // тема / язык
     Theme,
     Dark,
     Light,
     Language,
-    // #старт — экран создания проекта
     StartTitle,
     StartSub,
     ProjectName,
@@ -49,13 +43,10 @@ pub enum K {
     ErrNotProject,
     ErrCreate,
     IcMissing,
-    // #редактор
-    Files,
     Save,
     Close,
     Unsaved,
     NotText,
-    // #настройки проекта
     FoundProject,
     WillCreate,
     FoundList,
@@ -76,7 +67,35 @@ pub enum K {
     TargetThis,
     TargetHint,
     ErrRename,
-    // #запуск и #компиляция
+    KindQuestion,
+    KindApp,
+    KindAppHint,
+    KindGame,
+    KindGameHint,
+    GameType,
+    Dim3DSoon,
+    DimCustom,
+    CustomLabel,
+    AddNow,
+    GenScene,
+    GenFps,
+    GenPhysics,
+    GenCamera,
+    DefaultCode,
+    DefaultCodeHint,
+    LaterHint,
+    CreateBtn,
+    Explorer,
+    NewFile,
+    NewFolder,
+    NewFileShort,
+    NewFolderShort,
+    AddGen,
+    Rename,
+    Delete,
+    ErrExists,
+    GenAdded,
+    SetKind,
     Run,
     Build,
     BuildHint,
@@ -122,7 +141,6 @@ pub fn tr(lang: Lang, k: K) -> &'static str {
             "Could not determine the path of the program itself.",
         ),
 
-        K::Files => pick(lang, "ФАЙЛЫ", "FILES"),
         K::Save => pick(lang, "Сохранить", "Save"),
         K::Close => pick(lang, "Закрыть", "Close"),
         K::Unsaved => pick(lang, "не сохранено", "unsaved"),
@@ -166,6 +184,35 @@ pub fn tr(lang: Lang, k: K) -> &'static str {
         ),
         K::ErrRename => pick(lang, "Не удалось переименовать папку", "Could not rename the folder"),
 
+        K::KindQuestion => pick(lang, "Что создаём?", "What are we creating?"),
+        K::KindApp => pick(lang, "Программа", "Application"),
+        K::KindAppHint => pick(lang, "Обычное окно без игровых заготовок: ничего лишнего, только пустой проект.", "A plain window without game presets: nothing extra, just an empty project."),
+        K::KindGame => pick(lang, "Игра", "Game"),
+        K::KindGameHint => pick(lang, "Игровой цикл, спрайты, ввод. Сцену, FPS, физику и камеру можно добавить сразу.", "Game loop, sprites, input. You can add a scene, FPS, physics and camera right away."),
+        K::GameType => pick(lang, "Тип игры", "Game type"),
+        K::Dim3DSoon => pick(lang, "3D — скоро", "3D — coming soon"),
+        K::DimCustom => pick(lang, "Свой тип", "Custom"),
+        K::CustomLabel => pick(lang, "Название типа", "Type name"),
+        K::AddNow => pick(lang, "Добавить в проект сразу", "Add to the project now"),
+        K::GenScene => pick(lang, "Сцена", "Scene"),
+        K::GenFps => pick(lang, "FPS", "FPS"),
+        K::GenPhysics => pick(lang, "Физика", "Physics"),
+        K::GenCamera => pick(lang, "Камера", "Camera"),
+        K::DefaultCode => pick(lang, "Вставить код по умолчанию?", "Insert the default code?"),
+        K::DefaultCodeHint => pick(lang, "Да — в main.lua появится демо с летающими квадратами. Нет — файл будет пустым.", "Yes — main.lua gets the flying-squares demo. No — the file stays empty."),
+        K::LaterHint => pick(lang, "Сцену, FPS, физику и камеру можно добавить и потом: кнопка «Добавить» в проводнике.", "You can add a scene, FPS, physics and camera later: the “Add” button in the explorer."),
+        K::CreateBtn => pick(lang, "Создать", "Create"),
+        K::Explorer => pick(lang, "ПРОВОДНИК", "EXPLORER"),
+        K::NewFile => pick(lang, "Новый файл", "New file"),
+        K::NewFolder => pick(lang, "Новая папка", "New folder"),
+        K::NewFileShort => pick(lang, "+ Файл", "+ File"),
+        K::NewFolderShort => pick(lang, "+ Папка", "+ Folder"),
+        K::AddGen => pick(lang, "Добавить", "Add"),
+        K::Rename => pick(lang, "Переименовать", "Rename"),
+        K::Delete => pick(lang, "Удалить", "Delete"),
+        K::ErrExists => pick(lang, "Уже существует", "Already exists"),
+        K::GenAdded => pick(lang, "Добавлено", "Added"),
+        K::SetKind => pick(lang, "Тип проекта", "Project type"),
         K::Run => pick(lang, "Запустить", "Run"),
         K::Build => pick(lang, "Собрать exe", "Build exe"),
         K::BuildHint => pick(
