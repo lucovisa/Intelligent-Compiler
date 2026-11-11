@@ -59,6 +59,7 @@ local function resolve(a, b)
     end
 end
 
+-- #гравитация — интеграция скорости и положения тел за шаг времени.
 function physics:step(dt)
     local bodies = self.bodies
     for _, b in ipairs(bodies) do
