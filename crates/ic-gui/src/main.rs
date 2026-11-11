@@ -74,23 +74,27 @@ impl eframe::App for IcApp {
                 // стиль
                 ui.label(egui::RichText::new("⚙💡 IC Engine").strong().size(18.0));
                 ui.separator();
-                
+
                 if ui.button("📁 Новый проект").clicked() {
                     self.show_new_project_dialog = true;
                 }
-                
+
                 if ui.button("⚙ Настройки").clicked() {
                     self.show_settings_dialog = true;
                 }
 
                 if ui.button("▶ Запустить (F5)").clicked() {
                     // компиляция
-                    self.logs.push("[Запуск] Запуск проекта из текущей папки...".to_string());
+                    self.logs
+                        .push("[Запуск] Запуск проекта из текущей папки...".to_string());
                 }
 
                 if ui.button("📦 Собрать exe").clicked() {
                     // компиляция
-                    self.logs.push(format!("[Сборка] Выполняется сборка проекта '{}'...", self.proj_name));
+                    self.logs.push(format!(
+                        "[Сборка] Выполняется сборка проекта '{}'...",
+                        self.proj_name
+                    ));
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -102,31 +106,40 @@ impl eframe::App for IcApp {
             });
         });
 
-        // Проводник слева 
-        egui::SidePanel::left("left_panel").resizable(true).default_width(230.0).show(ctx, |ui| {
-            ui.heading("Проводник");
-            ui.horizontal(|ui| {
-                if ui.button("+ Файл").clicked() {}
-                if ui.button("+ Папка").clicked() {}
-            });
-            ui.separator();
-            ui.collapsing(format!("📁 {}", self.proj_name), |ui| {
-                if ui.selectable_label(self.active_tab == "main.lua", "📄 main.lua").clicked() {
-                    self.active_tab = "main.lua".to_string();
-                }
-                if ui.selectable_label(self.active_tab == "ic.toml", "⚙ ic.toml").clicked() {
-                    self.active_tab = "ic.toml".to_string();
-                }
-            });
+        // Проводник слева
+        egui::SidePanel::left("left_panel")
+            .resizable(true)
+            .default_width(230.0)
+            .show(ctx, |ui| {
+                ui.heading("Проводник");
+                ui.horizontal(|ui| {
+                    if ui.button("+ Файл").clicked() {}
+                    if ui.button("+ Папка").clicked() {}
+                });
+                ui.separator();
+                ui.collapsing(format!("📁 {}", self.proj_name), |ui| {
+                    if ui
+                        .selectable_label(self.active_tab == "main.lua", "📄 main.lua")
+                        .clicked()
+                    {
+                        self.active_tab = "main.lua".to_string();
+                    }
+                    if ui
+                        .selectable_label(self.active_tab == "ic.toml", "⚙ ic.toml")
+                        .clicked()
+                    {
+                        self.active_tab = "ic.toml".to_string();
+                    }
+                });
 
-            ui.add_space(15.0);
-            ui.separator();
-            ui.heading("Узлы сцены (Godot)");
-            ui.label("Node2D (Корень)");
-            ui.label(" ├── Camera2D");
-            ui.label(" ├── Player (KinematicBody2D)");
-            ui.label(" └── RigidBody2D (Физика)");
-        });
+                ui.add_space(15.0);
+                ui.separator();
+                ui.heading("Узлы сцены (Godot)");
+                ui.label("Node2D (Корень)");
+                ui.label(" ├── Camera2D");
+                ui.label(" ├── Player (KinematicBody2D)");
+                ui.label(" └── RigidBody2D (Физика)");
+            });
 
         // Центральная область
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -138,9 +151,15 @@ impl eframe::App for IcApp {
 
             if self.show_scene_view {
                 ui.vertical_centered(|ui| {
-                    let (rect, _) = ui.allocate_at_least(egui::vec2(640.0, 360.0), egui::Sense::drag());
-                    ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(20, 20, 25));
-                    ui.painter().circle_filled(rect.center(), 25.0, egui::Color32::from_rgb(220, 90, 40));
+                    let (rect, _) =
+                        ui.allocate_at_least(egui::vec2(640.0, 360.0), egui::Sense::drag());
+                    ui.painter()
+                        .rect_filled(rect, 4.0, egui::Color32::from_rgb(20, 20, 25));
+                    ui.painter().circle_filled(
+                        rect.center(),
+                        25.0,
+                        egui::Color32::from_rgb(220, 90, 40),
+                    );
                     ui.label("Перетаскивайте объекты на сцене мышью");
                 });
             } else {
@@ -150,17 +169,19 @@ impl eframe::App for IcApp {
                         .code_editor()
                         .desired_rows(22)
                         .lock_focus(true)
-                        .desired_width(f32::INFINITY)
+                        .desired_width(f32::INFINITY),
                 );
             }
 
             ui.separator();
             ui.heading("Консоль / Журнал");
-            egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
-                for log in &self.logs {
-                    ui.label(log);
-                }
-            });
+            egui::ScrollArea::vertical()
+                .max_height(100.0)
+                .show(ui, |ui| {
+                    for log in &self.logs {
+                        ui.label(log);
+                    }
+                });
         });
 
         if self.show_new_project_dialog {
@@ -215,10 +236,26 @@ impl eframe::App for IcApp {
                         egui::ComboBox::from_id_source("target_cb")
                             .selected_text(&self.build_target)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.build_target, "Эта система".to_string(), "Эта система");
-                                ui.selectable_value(&mut self.build_target, "Windows (.exe)".to_string(), "Windows (.exe)");
-                                ui.selectable_value(&mut self.build_target, "Linux".to_string(), "Linux");
-                                ui.selectable_value(&mut self.build_target, "macOS".to_string(), "macOS");
+                                ui.selectable_value(
+                                    &mut self.build_target,
+                                    "Эта система".to_string(),
+                                    "Эта система",
+                                );
+                                ui.selectable_value(
+                                    &mut self.build_target,
+                                    "Windows (.exe)".to_string(),
+                                    "Windows (.exe)",
+                                );
+                                ui.selectable_value(
+                                    &mut self.build_target,
+                                    "Linux".to_string(),
+                                    "Linux",
+                                );
+                                ui.selectable_value(
+                                    &mut self.build_target,
+                                    "macOS".to_string(),
+                                    "macOS",
+                                );
                             });
                     });
                     ui.separator();
