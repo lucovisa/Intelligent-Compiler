@@ -19,29 +19,67 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Auto-format
         if: github.event_name == 'push'
+        shell: bash
         run: |
-          cargo fmt --all || true
+          set -o pipefail
+          cargo fmt --all 2>&1 | tee check.log
           if ! git diff --quiet; then
             git config user.name "github-actions"
             git config user.email "github-actions@users.noreply.github.com"
             git commit -am "style: cargo fmt"
             git push || true
           fi
-      - run: cargo check --workspace
+      - name: Check workspace
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --workspace 2>&1 | tee -a check.log
+      - name: Upload check logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-error-log-linux
+          path: check.log
+          if-no-files-found: warn
 
   build:
     needs: check
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - runner: ubuntu-latest
+            platform: linux
+            runtime: target/release/ic-runtime
+            binary: target/release/ic
+          - runner: windows-latest
+            platform: windows
+            runtime: target/release/ic-runtime.exe
+            binary: target/release/ic.exe
+          - runner: macos-latest
+            platform: macos
+            runtime: target/release/ic-runtime
+            binary: target/release/ic
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Build standalone runtime and IC
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build --release -p ic-runtime 2>&1 | tee build.log
+          IC_RUNTIME="${{ matrix.runtime }}" cargo build --release -p ic-cli 2>&1 | tee -a build.log
+      - name: Upload IC binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ic-release-${{ matrix.platform }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
       - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-error-log-${{ matrix.os }}
-          path: target/
+          name: build-error-log-${{ matrix.platform }}
+          path: build.log
+          if-no-files-found: warn
