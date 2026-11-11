@@ -1197,7 +1197,8 @@ impl IcApp {
         let lang = self.settings.lang;
         if let Some(p) = self.project.as_mut() {
             if !project_path_is_safe(&p.dir, &path) {
-                self.log.push("open refused: file is outside the project".into());
+                self.log
+                    .push("open refused: file is outside the project".into());
                 return;
             }
             load_file(p, path, lang);
@@ -1285,7 +1286,8 @@ impl IcApp {
         }
         if let Some(path) = &p.open {
             if !project_path_is_safe(&p.dir, path) {
-                self.log.push("save refused: file is outside the project".into());
+                self.log
+                    .push("save refused: file is outside the project".into());
                 return;
             }
             match fs::write(path, &p.text) {
@@ -1402,10 +1404,7 @@ impl IcApp {
                     } else {
                         ProjectSettings::default()
                     };
-                    self.settings_draft = Some(SettingsDraft {
-                        name,
-                        s: settings,
-                    });
+                    self.settings_draft = Some(SettingsDraft { name, s: settings });
                 }
             }
             Action::SaveSettings => {
@@ -1423,7 +1422,8 @@ impl IcApp {
                     return;
                 }
                 if !project_path_is_safe(&proj.dir, &proj.dir.join(ProjectSettings::FILE)) {
-                    self.log.push("Settings save refused: path is outside the project".into());
+                    self.log
+                        .push("Settings save refused: path is outside the project".into());
                     self.settings_draft = Some(draft);
                     return;
                 }
@@ -1825,52 +1825,58 @@ impl eframe::App for IcApp {
                     let _ = fs::create_dir(&assets);
                 }
                 if !assets.is_dir() || !project_path_is_safe(&proj.dir, &assets) {
-                    self.log.push("Import refused: assets folder is outside the project".into());
+                    self.log
+                        .push("Import refused: assets folder is outside the project".into());
                 } else {
-                for dropped in dropped_files {
-                    let name = dropped
-                        .path
-                        .as_ref()
-                        .and_then(|p| p.file_name())
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .filter(|n| !n.is_empty())
-                        .unwrap_or_else(|| {
-                            if dropped.name.is_empty() {
-                                "dropped_asset.bin".into()
-                            } else {
-                                // Берём только имя файла, чтобы имя из drag-and-drop
-                                // не могло подставить ../ или путь к другой папке.
-                                dropped.name.replace('\\', "/")
-                                    .rsplit('/')
-                                    .next()
-                                    .filter(|name| !name.is_empty() && *name != "." && *name != "..")
-                                    .unwrap_or("dropped_asset.bin")
-                                    .to_string()
-                            }
-                        });
-                    let destination = unique_path(&assets, &name);
-                    if !project_path_is_safe(&proj.dir, &destination) {
-                        self.log.push("Import refused: destination is outside the project".into());
-                        continue;
-                    }
-                    let result = if let Some(source) = dropped.path.as_ref() {
-                        if source.is_file() {
-                            fs::copy(source, &destination).map(|_| ())
-                        } else {
+                    for dropped in dropped_files {
+                        let name = dropped
+                            .path
+                            .as_ref()
+                            .and_then(|p| p.file_name())
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .filter(|n| !n.is_empty())
+                            .unwrap_or_else(|| {
+                                if dropped.name.is_empty() {
+                                    "dropped_asset.bin".into()
+                                } else {
+                                    // Берём только имя файла, чтобы имя из drag-and-drop
+                                    // не могло подставить ../ или путь к другой папке.
+                                    dropped
+                                        .name
+                                        .replace('\\', "/")
+                                        .rsplit('/')
+                                        .next()
+                                        .filter(|name| {
+                                            !name.is_empty() && *name != "." && *name != ".."
+                                        })
+                                        .unwrap_or("dropped_asset.bin")
+                                        .to_string()
+                                }
+                            });
+                        let destination = unique_path(&assets, &name);
+                        if !project_path_is_safe(&proj.dir, &destination) {
+                            self.log
+                                .push("Import refused: destination is outside the project".into());
                             continue;
                         }
-                    } else if let Some(bytes) = dropped.bytes.as_ref() {
-                        fs::write(&destination, bytes.as_ref())
-                    } else {
-                        continue;
-                    };
-                    match result {
-                        Ok(()) => self
-                            .log
-                            .push(format!("Imported: {}", destination.display())),
-                        Err(e) => self.log.push(format!("Import error: {e}")),
+                        let result = if let Some(source) = dropped.path.as_ref() {
+                            if source.is_file() {
+                                fs::copy(source, &destination).map(|_| ())
+                            } else {
+                                continue;
+                            }
+                        } else if let Some(bytes) = dropped.bytes.as_ref() {
+                            fs::write(&destination, bytes.as_ref())
+                        } else {
+                            continue;
+                        };
+                        match result {
+                            Ok(()) => self
+                                .log
+                                .push(format!("Imported: {}", destination.display())),
+                            Err(e) => self.log.push(format!("Import error: {e}")),
+                        }
                     }
-                }
                 }
                 proj.files.clear();
                 scan(&proj.dir, 0, &mut proj.files);
