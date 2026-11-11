@@ -1840,7 +1840,7 @@ impl eframe::App for IcApp {
                             } else {
                                 // Берём только имя файла, чтобы имя из drag-and-drop
                                 // не могло подставить ../ или путь к другой папке.
-                                dropped.name.replace('\\\\', "/")
+                                dropped.name.replace('\\', "/")
                                     .rsplit('/')
                                     .next()
                                     .filter(|name| !name.is_empty() && *name != "." && *name != "..")
