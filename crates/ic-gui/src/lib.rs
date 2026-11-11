@@ -754,7 +754,10 @@ impl SceneEditor {
         self.status = None;
         self.drag_origin = None;
         if let Ok(text) = fs::read_to_string(&path) {
-            for line in text.lines().filter(|line| !line.trim().is_empty() && !line.starts_with('#')) {
+            for line in text
+                .lines()
+                .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+            {
                 let parts: Vec<_> = line.split('|').collect();
                 if parts.len() != 9 || parts[0] != "node" {
                     continue;
@@ -771,7 +774,11 @@ impl SceneEditor {
                 if let (Ok(x), Ok(y), Ok(width), Ok(height), Ok(r), Ok(g), Ok(b)) = parsed {
                     self.nodes.push(SceneNode {
                         name: parts[1].replace("%7C", "|"),
-                        x, y, width, height, color: [r, g, b],
+                        x,
+                        y,
+                        width,
+                        height,
+                        color: [r, g, b],
                     });
                 }
             }
@@ -789,8 +796,14 @@ impl SceneEditor {
             let name = node.name.replace('|', "%7C").replace('\n', " ");
             out.push_str(&format!(
                 "node|{}|{:.2}|{:.2}|{:.2}|{:.2}|{}|{}|{}\n",
-                name, node.x, node.y, node.width, node.height,
-                node.color[0], node.color[1], node.color[2]
+                name,
+                node.x,
+                node.y,
+                node.width,
+                node.height,
+                node.color[0],
+                node.color[1],
+                node.color[2]
             ));
         }
         fs::write(path, out).map_err(|e| format!("scene save error: {e}"))?;
@@ -802,7 +815,14 @@ impl SceneEditor {
     fn add_node(&mut self) {
         let n = self.nodes.len();
         self.nodes.push(SceneNode {
-            name: format!("Node2D{}", if n == 0 { String::new() } else { (n + 1).to_string() }),
+            name: format!(
+                "Node2D{}",
+                if n == 0 {
+                    String::new()
+                } else {
+                    (n + 1).to_string()
+                }
+            ),
             x: 60.0 + n as f32 * 18.0,
             y: 60.0 + n as f32 * 18.0,
             width: 96.0,
@@ -824,12 +844,19 @@ fn rebase_path(path: &Path, old_root: &Path, new_root: &Path) -> PathBuf {
 
 fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let original = Path::new(name);
-    let stem = original.file_stem().and_then(|v| v.to_str()).unwrap_or("asset");
+    let stem = original
+        .file_stem()
+        .and_then(|v| v.to_str())
+        .unwrap_or("asset");
     let ext = original.extension().and_then(|v| v.to_str()).unwrap_or("");
     let mut candidate = dir.join(name);
     let mut index = 2;
     while candidate.exists() {
-        let file = if ext.is_empty() { format!("{stem}_{index}") } else { format!("{stem}_{index}.{ext}") };
+        let file = if ext.is_empty() {
+            format!("{stem}_{index}")
+        } else {
+            format!("{stem}_{index}.{ext}")
+        };
         candidate = dir.join(file);
         index += 1;
     }
@@ -1008,13 +1035,21 @@ impl IcApp {
                 } else {
                     if let Some(o) = proj.open.clone() {
                         if let Ok(rel) = o.strip_prefix(&pr.path) {
-                            proj.open = Some(if rel.as_os_str().is_empty() { new.clone() } else { new.join(rel) });
+                            proj.open = Some(if rel.as_os_str().is_empty() {
+                                new.clone()
+                            } else {
+                                new.join(rel)
+                            });
                         }
                     }
                     for tab in &mut proj.tabs {
                         *tab = rebase_path(tab, &pr.path, &new);
                     }
-                    proj.collapsed = proj.collapsed.iter().map(|path| rebase_path(path, &pr.path, &new)).collect();
+                    proj.collapsed = proj
+                        .collapsed
+                        .iter()
+                        .map(|path| rebase_path(path, &pr.path, &new))
+                        .collect();
                     proj.selected = new;
                 }
             }
@@ -1031,7 +1066,9 @@ impl IcApp {
                             proj.open = None;
                             proj.text.clear();
                             proj.dirty = false;
-                            if let Some(next) = proj.tabs.last().cloned() { load_file(proj, next, lang); }
+                            if let Some(next) = proj.tabs.last().cloned() {
+                                load_file(proj, next, lang);
+                            }
                         }
                         proj.selected = proj.dir.clone();
                     }
@@ -1123,7 +1160,9 @@ impl IcApp {
     fn move_project_file(&mut self, source: PathBuf, destination_dir: PathBuf) {
         self.save();
         let lang = self.settings.lang;
-        let Some(proj) = self.project.as_mut() else { return };
+        let Some(proj) = self.project.as_mut() else {
+            return;
+        };
         if (!source.is_file() && !source.is_dir())
             || !destination_dir.is_dir()
             || !source.starts_with(&proj.dir)
@@ -1132,10 +1171,16 @@ impl IcApp {
         {
             return;
         }
-        let Some(name) = source.file_name() else { return };
+        let Some(name) = source.file_name() else {
+            return;
+        };
         let destination = destination_dir.join(name);
         if destination.exists() {
-            self.log.push(format!("{}: {}", tr(lang, K::ErrExists), destination.display()));
+            self.log.push(format!(
+                "{}: {}",
+                tr(lang, K::ErrExists),
+                destination.display()
+            ));
             return;
         }
         if let Err(e) = fs::rename(&source, &destination) {
@@ -1146,9 +1191,15 @@ impl IcApp {
             *tab = rebase_path(tab, &source, &destination);
         }
         if let Some(open) = proj.open.clone() {
-            if open.starts_with(&source) { proj.open = Some(rebase_path(&open, &source, &destination)); }
+            if open.starts_with(&source) {
+                proj.open = Some(rebase_path(&open, &source, &destination));
+            }
         }
-        proj.collapsed = proj.collapsed.iter().map(|path| rebase_path(path, &source, &destination)).collect();
+        proj.collapsed = proj
+            .collapsed
+            .iter()
+            .map(|path| rebase_path(path, &source, &destination))
+            .collect();
         proj.selected = rebase_path(&proj.selected, &source, &destination);
         proj.files.clear();
         scan(&proj.dir, 0, &mut proj.files);
@@ -1238,7 +1289,9 @@ impl IcApp {
             }
             Action::CloseProject => {
                 self.save();
-                if self.scene_editor.dirty { let _ = self.scene_editor.save(); }
+                if self.scene_editor.dirty {
+                    let _ = self.scene_editor.save();
+                }
                 self.project = None;
                 self.scene_editor.open = false;
                 self.start_error = None;
@@ -1308,14 +1361,22 @@ impl IcApp {
                         return;
                     }
                     if let Some(o) = proj.open.clone() {
-                        if let Ok(rel) = o.strip_prefix(&old) { proj.open = Some(new.join(rel)); }
+                        if let Ok(rel) = o.strip_prefix(&old) {
+                            proj.open = Some(new.join(rel));
+                        }
                     }
                     for tab in &mut proj.tabs {
                         *tab = rebase_path(tab, &old, &new);
                     }
-                    proj.collapsed = proj.collapsed.iter().map(|path| rebase_path(path, &old, &new)).collect();
+                    proj.collapsed = proj
+                        .collapsed
+                        .iter()
+                        .map(|path| rebase_path(path, &old, &new))
+                        .collect();
                     if let Some(scene_path) = self.scene_editor.path.clone() {
-                        if let Ok(rel) = scene_path.strip_prefix(&old) { self.scene_editor.path = Some(new.join(rel)); }
+                        if let Ok(rel) = scene_path.strip_prefix(&old) {
+                            self.scene_editor.path = Some(new.join(rel));
+                        }
                     }
                     proj.dir = new.clone();
                     proj.name = new_name;
@@ -1398,18 +1459,27 @@ impl IcApp {
 
         ctx.show_viewport_immediate(viewport_id, builder, |scene_ctx, _class| {
             if scene_ctx.input(|i| i.viewport().close_requested()) {
-                if scene.dirty { let _ = scene.save(); }
+                if scene.dirty {
+                    let _ = scene.save();
+                }
                 scene.open = false;
                 return;
             }
             if scene_ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
-                if let Err(e) = scene.save() { scene.status = Some(e); }
-                else { scene.status = Some(tr(lang, K::SceneSaved).to_string()); }
+                if let Err(e) = scene.save() {
+                    scene.status = Some(e);
+                } else {
+                    scene.status = Some(tr(lang, K::SceneSaved).to_string());
+                }
             }
             let panel = palette(dark).panel;
             let canvas = palette(dark).editor;
             egui::TopBottomPanel::top("scene_toolbar")
-                .frame(egui::Frame::none().fill(panel).inner_margin(Margin::symmetric(12.0, 8.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(panel)
+                        .inner_margin(Margin::symmetric(12.0, 8.0)),
+                )
                 .show(scene_ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("IC  /  SCENE").strong());
@@ -1417,12 +1487,21 @@ impl IcApp {
                         if primary_button(ui, tr(lang, K::AddSceneNode)).clicked() {
                             scene.add_node();
                         }
-                        if button(ui, tr(lang, K::Save)).on_hover_text("Ctrl+S").clicked() {
-                            if let Err(e) = scene.save() { scene.status = Some(e); }
-                            else { scene.status = Some(tr(lang, K::SceneSaved).to_string()); }
+                        if button(ui, tr(lang, K::Save))
+                            .on_hover_text("Ctrl+S")
+                            .clicked()
+                        {
+                            if let Err(e) = scene.save() {
+                                scene.status = Some(e);
+                            } else {
+                                scene.status = Some(tr(lang, K::SceneSaved).to_string());
+                            }
                         }
                         if scene.dirty {
-                            ui.label(RichText::new("● unsaved").color(Color32::from_rgb(0xE5, 0xA0, 0x3B)));
+                            ui.label(
+                                RichText::new("● unsaved")
+                                    .color(Color32::from_rgb(0xE5, 0xA0, 0x3B)),
+                            );
                         }
                         if let Some(status) = &scene.status {
                             ui.label(RichText::new(status).small().weak());
@@ -1434,14 +1513,21 @@ impl IcApp {
                 .resizable(true)
                 .default_width(210.0)
                 .width_range(150.0..=420.0)
-                .frame(egui::Frame::none().fill(panel).inner_margin(Margin::same(10.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(panel)
+                        .inner_margin(Margin::same(10.0)),
+                )
                 .show(scene_ctx, |ui| {
                     ui.label(RichText::new(tr(lang, K::Hierarchy)).small().strong());
                     ui.separator();
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for index in 0..scene.nodes.len() {
                             let label = format!("◇  {}", scene.nodes[index].name);
-                            if ui.selectable_label(scene.selected == Some(index), label).clicked() {
+                            if ui
+                                .selectable_label(scene.selected == Some(index), label)
+                                .clicked()
+                            {
                                 scene.selected = Some(index);
                             }
                         }
@@ -1455,33 +1541,69 @@ impl IcApp {
                 .resizable(true)
                 .default_width(250.0)
                 .width_range(190.0..=480.0)
-                .frame(egui::Frame::none().fill(panel).inner_margin(Margin::same(10.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(panel)
+                        .inner_margin(Margin::same(10.0)),
+                )
                 .show(scene_ctx, |ui| {
                     ui.label(RichText::new(tr(lang, K::Inspector)).small().strong());
                     ui.separator();
                     if let Some(index) = scene.selected.filter(|i| *i < scene.nodes.len()) {
                         let node = &mut scene.nodes[index];
                         ui.label(tr(lang, K::NodeName));
-                        if ui.text_edit_singleline(&mut node.name).changed() { scene.dirty = true; }
+                        if ui.text_edit_singleline(&mut node.name).changed() {
+                            scene.dirty = true;
+                        }
                         ui.add_space(8.0);
                         ui.label(tr(lang, K::Position));
                         ui.horizontal(|ui| {
                             ui.label("X");
-                            if ui.add(egui::DragValue::new(&mut node.x).speed(1.0)).changed() { scene.dirty = true; }
+                            if ui
+                                .add(egui::DragValue::new(&mut node.x).speed(1.0))
+                                .changed()
+                            {
+                                scene.dirty = true;
+                            }
                             ui.label("Y");
-                            if ui.add(egui::DragValue::new(&mut node.y).speed(1.0)).changed() { scene.dirty = true; }
+                            if ui
+                                .add(egui::DragValue::new(&mut node.y).speed(1.0))
+                                .changed()
+                            {
+                                scene.dirty = true;
+                            }
                         });
                         ui.add_space(8.0);
                         ui.label(tr(lang, K::Size));
                         ui.horizontal(|ui| {
                             ui.label("W");
-                            if ui.add(egui::DragValue::new(&mut node.width).speed(1.0).clamp_range(8.0..=2048.0)).changed() { scene.dirty = true; }
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut node.width)
+                                        .speed(1.0)
+                                        .clamp_range(8.0..=2048.0),
+                                )
+                                .changed()
+                            {
+                                scene.dirty = true;
+                            }
                             ui.label("H");
-                            if ui.add(egui::DragValue::new(&mut node.height).speed(1.0).clamp_range(8.0..=2048.0)).changed() { scene.dirty = true; }
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut node.height)
+                                        .speed(1.0)
+                                        .clamp_range(8.0..=2048.0),
+                                )
+                                .changed()
+                            {
+                                scene.dirty = true;
+                            }
                         });
                         ui.add_space(8.0);
                         ui.label(tr(lang, K::Color));
-                        if ui.color_edit_button_srgb(&mut node.color).changed() { scene.dirty = true; }
+                        if ui.color_edit_button_srgb(&mut node.color).changed() {
+                            scene.dirty = true;
+                        }
                         ui.add_space(12.0);
                         if ui.button(tr(lang, K::DeleteSceneNode)).clicked() {
                             scene.nodes.remove(index);
@@ -1494,20 +1616,35 @@ impl IcApp {
                 });
 
             egui::CentralPanel::default()
-                .frame(egui::Frame::none().fill(canvas).inner_margin(Margin::same(10.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(canvas)
+                        .inner_margin(Margin::same(10.0)),
+                )
                 .show(scene_ctx, |ui| {
-                    let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+                    let (rect, _) =
+                        ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
                     let painter = ui.painter_at(rect);
                     painter.rect_filled(rect, 4.0, canvas);
-                    let grid_color = if dark { Color32::from_gray(55) } else { Color32::from_gray(220) };
+                    let grid_color = if dark {
+                        Color32::from_gray(55)
+                    } else {
+                        Color32::from_gray(220)
+                    };
                     let mut gx = rect.left() + 24.0;
                     while gx < rect.right() {
-                        painter.line_segment([egui::pos2(gx, rect.top()), egui::pos2(gx, rect.bottom())], Stroke::new(1.0, grid_color));
+                        painter.line_segment(
+                            [egui::pos2(gx, rect.top()), egui::pos2(gx, rect.bottom())],
+                            Stroke::new(1.0, grid_color),
+                        );
                         gx += 32.0;
                     }
                     let mut gy = rect.top() + 24.0;
                     while gy < rect.bottom() {
-                        painter.line_segment([egui::pos2(rect.left(), gy), egui::pos2(rect.right(), gy)], Stroke::new(1.0, grid_color));
+                        painter.line_segment(
+                            [egui::pos2(rect.left(), gy), egui::pos2(rect.right(), gy)],
+                            Stroke::new(1.0, grid_color),
+                        );
                         gy += 32.0;
                     }
                     let origin = rect.left_top() + egui::vec2(24.0, 24.0);
@@ -1517,8 +1654,14 @@ impl IcApp {
                             origin + egui::vec2(current.x, current.y),
                             egui::vec2(current.width.max(8.0), current.height.max(8.0)),
                         );
-                        let response = ui.interact(node_rect, egui::Id::new(("scene_node", index)), egui::Sense::click_and_drag());
-                        if response.clicked() { scene.selected = Some(index); }
+                        let response = ui.interact(
+                            node_rect,
+                            egui::Id::new(("scene_node", index)),
+                            egui::Sense::click_and_drag(),
+                        );
+                        if response.clicked() {
+                            scene.selected = Some(index);
+                        }
                         if response.drag_started() {
                             scene.selected = Some(index);
                             scene.drag_origin = Some((index, current.x, current.y));
@@ -1539,12 +1682,37 @@ impl IcApp {
                         painter.rect_stroke(
                             node_rect,
                             Rounding::same(3.0),
-                            Stroke::new(if scene.selected == Some(index) { 2.0 } else { 1.0 }, if scene.selected == Some(index) { Color32::WHITE } else { fill }),
+                            Stroke::new(
+                                if scene.selected == Some(index) {
+                                    2.0
+                                } else {
+                                    1.0
+                                },
+                                if scene.selected == Some(index) {
+                                    Color32::WHITE
+                                } else {
+                                    fill
+                                },
+                            ),
                         );
-                        painter.text(node_rect.center(), egui::Align2::CENTER_CENTER, &node.name, FontId::proportional(14.0), Color32::WHITE);
+                        painter.text(
+                            node_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            &node.name,
+                            FontId::proportional(14.0),
+                            Color32::WHITE,
+                        );
                     }
-                    if scene_ctx.input(|i| i.pointer.any_released()) { scene.drag_origin = None; }
-                    painter.text(rect.left_bottom() + egui::vec2(8.0, -8.0), egui::Align2::LEFT_BOTTOM, tr(lang, K::CanvasHint), FontId::proportional(11.0), scene_ctx.style().visuals.weak_text_color());
+                    if scene_ctx.input(|i| i.pointer.any_released()) {
+                        scene.drag_origin = None;
+                    }
+                    painter.text(
+                        rect.left_bottom() + egui::vec2(8.0, -8.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        tr(lang, K::CanvasHint),
+                        FontId::proportional(11.0),
+                        scene_ctx.style().visuals.weak_text_color(),
+                    );
                 });
         });
         let scene_file_after = scene.path.as_ref().is_some_and(|path| path.is_file());
@@ -1569,21 +1737,35 @@ impl eframe::App for IcApp {
                 let assets = proj.dir.join("assets");
                 let _ = fs::create_dir_all(&assets);
                 for dropped in dropped_files {
-                    let name = dropped.path.as_ref()
+                    let name = dropped
+                        .path
+                        .as_ref()
                         .and_then(|p| p.file_name())
                         .map(|n| n.to_string_lossy().into_owned())
                         .filter(|n| !n.is_empty())
-                        .unwrap_or_else(|| if dropped.name.is_empty() { "dropped_asset.bin".into() } else { dropped.name.clone() });
+                        .unwrap_or_else(|| {
+                            if dropped.name.is_empty() {
+                                "dropped_asset.bin".into()
+                            } else {
+                                dropped.name.clone()
+                            }
+                        });
                     let destination = unique_path(&assets, &name);
                     let result = if let Some(source) = dropped.path.as_ref() {
-                        if source.is_file() { fs::copy(source, &destination).map(|_| ()) } else { continue }
+                        if source.is_file() {
+                            fs::copy(source, &destination).map(|_| ())
+                        } else {
+                            continue;
+                        }
                     } else if let Some(bytes) = dropped.bytes.as_ref() {
                         fs::write(&destination, bytes.as_ref())
                     } else {
                         continue;
                     };
                     match result {
-                        Ok(()) => self.log.push(format!("Imported: {}", destination.display())),
+                        Ok(()) => self
+                            .log
+                            .push(format!("Imported: {}", destination.display())),
                         Err(e) => self.log.push(format!("Import error: {e}")),
                     }
                 }
@@ -1704,7 +1886,10 @@ impl eframe::App for IcApp {
                 if let Some(proj) = self.project.as_ref() {
                     let mut base = proj.selected.clone();
                     if !base.is_dir() {
-                        base = base.parent().map(Path::to_path_buf).unwrap_or_else(|| proj.dir.clone());
+                        base = base
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| proj.dir.clone());
                     }
                     action = Some(Action::PromptOpen(PromptKind::NewFolder, base));
                 }
@@ -1712,7 +1897,10 @@ impl eframe::App for IcApp {
                 if let Some(proj) = self.project.as_ref() {
                     let mut base = proj.selected.clone();
                     if !base.is_dir() {
-                        base = base.parent().map(Path::to_path_buf).unwrap_or_else(|| proj.dir.clone());
+                        base = base
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| proj.dir.clone());
                     }
                     action = Some(Action::PromptOpen(PromptKind::NewFile, base));
                 }
@@ -1723,12 +1911,21 @@ impl eframe::App for IcApp {
                 }
             }
             let previous_tab = ctx.input_mut(|i| i.consume_key(command_shift, egui::Key::Tab));
-            let next_tab = !previous_tab && ctx.input_mut(|i| i.consume_key(command, egui::Key::Tab));
+            let next_tab =
+                !previous_tab && ctx.input_mut(|i| i.consume_key(command, egui::Key::Tab));
             if previous_tab || next_tab {
                 if let Some(proj) = self.project.as_ref() {
                     if !proj.tabs.is_empty() {
-                        let current = proj.open.as_ref().and_then(|path| proj.tabs.iter().position(|tab| tab == path)).unwrap_or(0);
-                        let next = if previous_tab { (current + proj.tabs.len() - 1) % proj.tabs.len() } else { (current + 1) % proj.tabs.len() };
+                        let current = proj
+                            .open
+                            .as_ref()
+                            .and_then(|path| proj.tabs.iter().position(|tab| tab == path))
+                            .unwrap_or(0);
+                        let next = if previous_tab {
+                            (current + proj.tabs.len() - 1) % proj.tabs.len()
+                        } else {
+                            (current + 1) % proj.tabs.len()
+                        };
                         action = Some(Action::SelectTab(proj.tabs[next].clone()));
                     }
                 }
@@ -1818,7 +2015,14 @@ impl eframe::App for IcApp {
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            explorer_rows(ui, proj, dark, lang, &mut self.dragging_file, &mut action);
+                            explorer_rows(
+                                ui,
+                                proj,
+                                dark,
+                                lang,
+                                &mut self.dragging_file,
+                                &mut action,
+                            );
                             if ui.input(|i| i.pointer.any_released()) {
                                 self.dragging_file = None;
                             }
@@ -1844,24 +2048,36 @@ impl eframe::App for IcApp {
                         }
                     });
                     ui.add_space(4.0);
-                    egui::Frame::none().fill(p.panel).rounding(Rounding::same(5.0)).inner_margin(Margin::symmetric(6.0, 4.0)).show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            let tabs = proj.tabs.clone();
-                            for tab in tabs {
-                                let label = tab.strip_prefix(&proj.dir).unwrap_or(&tab).display().to_string();
-                                let active = proj.open.as_ref() == Some(&tab);
-                                if ui.selectable_label(active, label).clicked() {
-                                    action = Some(Action::SelectTab(tab.clone()));
+                    egui::Frame::none()
+                        .fill(p.panel)
+                        .rounding(Rounding::same(5.0))
+                        .inner_margin(Margin::symmetric(6.0, 4.0))
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                let tabs = proj.tabs.clone();
+                                for tab in tabs {
+                                    let label = tab
+                                        .strip_prefix(&proj.dir)
+                                        .unwrap_or(&tab)
+                                        .display()
+                                        .to_string();
+                                    let active = proj.open.as_ref() == Some(&tab);
+                                    if ui.selectable_label(active, label).clicked() {
+                                        action = Some(Action::SelectTab(tab.clone()));
+                                    }
+                                    if ui
+                                        .small_button("×")
+                                        .on_hover_text("Close tab (Ctrl+W)")
+                                        .clicked()
+                                    {
+                                        action = Some(Action::CloseTab(tab));
+                                    }
                                 }
-                                if ui.small_button("×").on_hover_text("Close tab (Ctrl+W)").clicked() {
-                                    action = Some(Action::CloseTab(tab));
+                                if proj.tabs.is_empty() {
+                                    ui.label(RichText::new("No file open").weak().small());
                                 }
-                            }
-                            if proj.tabs.is_empty() {
-                                ui.label(RichText::new("No file open").weak().small());
-                            }
+                            });
                         });
-                    });
                     if let Some(note) = &proj.note {
                         ui.label(note.as_str());
                     }
@@ -2048,47 +2264,75 @@ impl eframe::App for IcApp {
                     ui.add_space(10.0);
                     let group_style = ui.style().clone();
                     ui.columns(2, |columns| {
-                        egui::Frame::group(&group_style).rounding(Rounding::same(7.0)).inner_margin(Margin::same(12.0)).show(&mut columns[0], |ui| {
-                            ui.label(RichText::new(tr(lang, K::ProjectGroup)).small().strong());
-                            ui.add_space(6.0);
-                            ui.label(tr(lang, K::SetName));
-                            ui.add(egui::TextEdit::singleline(&mut draft.name).desired_width(f32::INFINITY));
-                            ui.add_space(8.0);
-                            ui.label(tr(lang, K::SetTitle));
-                            ui.add(egui::TextEdit::singleline(&mut draft.s.title).desired_width(f32::INFINITY));
-                            ui.add_space(8.0);
-                            ui.label(RichText::new(tr(lang, K::SetNameHint)).small().weak());
-                        });
-                        egui::Frame::group(&group_style).rounding(Rounding::same(7.0)).inner_margin(Margin::same(12.0)).show(&mut columns[1], |ui| {
-                            ui.label(RichText::new(tr(lang, K::WindowGroup)).small().strong());
-                            ui.add_space(6.0);
-                            ui.label(tr(lang, K::SetWindow));
-                            ui.horizontal(|ui| {
-                                ui.add(egui::DragValue::new(&mut draft.s.width).clamp_range(320..=7680).suffix(" px"));
-                                ui.label("×");
-                                ui.add(egui::DragValue::new(&mut draft.s.height).clamp_range(240..=4320).suffix(" px"));
+                        egui::Frame::group(&group_style)
+                            .rounding(Rounding::same(7.0))
+                            .inner_margin(Margin::same(12.0))
+                            .show(&mut columns[0], |ui| {
+                                ui.label(RichText::new(tr(lang, K::ProjectGroup)).small().strong());
+                                ui.add_space(6.0);
+                                ui.label(tr(lang, K::SetName));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut draft.name)
+                                        .desired_width(f32::INFINITY),
+                                );
+                                ui.add_space(8.0);
+                                ui.label(tr(lang, K::SetTitle));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut draft.s.title)
+                                        .desired_width(f32::INFINITY),
+                                );
+                                ui.add_space(8.0);
+                                ui.label(RichText::new(tr(lang, K::SetNameHint)).small().weak());
                             });
-                            ui.add_space(8.0);
-                            ui.label(tr(lang, K::SetTick));
-                            ui.add(egui::DragValue::new(&mut draft.s.tick_rate).clamp_range(10..=480).suffix(" Hz"));
-                            ui.add_space(8.0);
-                            ui.horizontal(|ui| {
-                                ui.label(tr(lang, K::SetBackground));
-                                ui.color_edit_button_srgb(&mut draft.s.background);
-                            });
-                            ui.add_space(8.0);
-                            ui.label(tr(lang, K::SetTarget));
-                            egui::ComboBox::from_id_source("build_target")
-                                .selected_text(target_label(lang, &draft.s.target))
-                                .width(ui.available_width())
-                                .show_ui(ui, |ui| {
-                                    for t in TARGETS {
-                                        ui.selectable_value(&mut draft.s.target, t.to_string(), target_label(lang, t));
-                                    }
+                        egui::Frame::group(&group_style)
+                            .rounding(Rounding::same(7.0))
+                            .inner_margin(Margin::same(12.0))
+                            .show(&mut columns[1], |ui| {
+                                ui.label(RichText::new(tr(lang, K::WindowGroup)).small().strong());
+                                ui.add_space(6.0);
+                                ui.label(tr(lang, K::SetWindow));
+                                ui.horizontal(|ui| {
+                                    ui.add(
+                                        egui::DragValue::new(&mut draft.s.width)
+                                            .clamp_range(320..=7680)
+                                            .suffix(" px"),
+                                    );
+                                    ui.label("×");
+                                    ui.add(
+                                        egui::DragValue::new(&mut draft.s.height)
+                                            .clamp_range(240..=4320)
+                                            .suffix(" px"),
+                                    );
                                 });
-                            ui.add_space(6.0);
-                            ui.label(RichText::new(tr(lang, K::TargetHint)).small().weak());
-                        });
+                                ui.add_space(8.0);
+                                ui.label(tr(lang, K::SetTick));
+                                ui.add(
+                                    egui::DragValue::new(&mut draft.s.tick_rate)
+                                        .clamp_range(10..=480)
+                                        .suffix(" Hz"),
+                                );
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(tr(lang, K::SetBackground));
+                                    ui.color_edit_button_srgb(&mut draft.s.background);
+                                });
+                                ui.add_space(8.0);
+                                ui.label(tr(lang, K::SetTarget));
+                                egui::ComboBox::from_id_source("build_target")
+                                    .selected_text(target_label(lang, &draft.s.target))
+                                    .width(ui.available_width())
+                                    .show_ui(ui, |ui| {
+                                        for t in TARGETS {
+                                            ui.selectable_value(
+                                                &mut draft.s.target,
+                                                t.to_string(),
+                                                target_label(lang, t),
+                                            );
+                                        }
+                                    });
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(tr(lang, K::TargetHint)).small().weak());
+                            });
                     });
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
@@ -2114,22 +2358,44 @@ impl eframe::App for IcApp {
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
                     ui.label(RichText::new("Ctrl+P").small().weak());
-                    ui.add(egui::TextEdit::singleline(&mut self.quick_filter).hint_text("Search files…").desired_width(f32::INFINITY));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.quick_filter)
+                            .hint_text("Search files…")
+                            .desired_width(f32::INFINITY),
+                    );
                     if let Some(proj) = self.project.as_ref() {
                         let filter = self.quick_filter.to_lowercase();
-                        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-                            for file in proj.files.iter().filter(|f| !f.is_dir) {
-                                let label = file.path.strip_prefix(&proj.dir).unwrap_or(&file.path).display().to_string();
-                                if !filter.is_empty() && !label.to_lowercase().contains(&filter) { continue; }
-                                if ui.selectable_label(proj.open.as_ref() == Some(&file.path), label).clicked() {
-                                    action = Some(Action::SelectTab(file.path.clone()));
-                                    self.quick_open = false;
+                        egui::ScrollArea::vertical()
+                            .max_height(360.0)
+                            .show(ui, |ui| {
+                                for file in proj.files.iter().filter(|f| !f.is_dir) {
+                                    let label = file
+                                        .path
+                                        .strip_prefix(&proj.dir)
+                                        .unwrap_or(&file.path)
+                                        .display()
+                                        .to_string();
+                                    if !filter.is_empty() && !label.to_lowercase().contains(&filter)
+                                    {
+                                        continue;
+                                    }
+                                    if ui
+                                        .selectable_label(
+                                            proj.open.as_ref() == Some(&file.path),
+                                            label,
+                                        )
+                                        .clicked()
+                                    {
+                                        action = Some(Action::SelectTab(file.path.clone()));
+                                        self.quick_open = false;
+                                    }
                                 }
-                            }
-                        });
+                            });
                     }
                 });
-            if !open { self.quick_open = false; }
+            if !open {
+                self.quick_open = false;
+            }
         }
 
         if let Some(dlg) = self.new_dialog.as_mut() {
