@@ -33,6 +33,30 @@ fn resolve_dir(input: &str) -> PathBuf {
     }
 }
 
+// #защита-проекта — проверяет, что путь и его реальные родительские каталоги
+// остаются внутри корня проекта. Символические ссылки за пределы проекта запрещены.
+fn project_path_is_safe(project_dir: &Path, path: &Path) -> bool {
+    let Ok(root) = fs::canonicalize(project_dir) else {
+        return false;
+    };
+    if !path.starts_with(project_dir) {
+        return false;
+    }
+
+    if path.exists() {
+        return fs::canonicalize(path)
+            .map(|real| real.starts_with(&root))
+            .unwrap_or(false);
+    }
+
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    fs::canonicalize(parent)
+        .map(|real_parent| real_parent.starts_with(&root))
+        .unwrap_or(false)
+}
+
 fn confine_caches() {
     if let Some(dir) = exe_dir() {
         let cache = dir.join("cache");
@@ -418,6 +442,10 @@ fn scan(dir: &Path, depth: usize, out: &mut Vec<FileEntry>) {
         )
     });
     for e in items {
+        // Не показываем и не обходим symlink: он может вести за пределы проекта.
+        if e.file_type().map(|kind| kind.is_symlink()).unwrap_or(true) {
+            continue;
+        }
         let name = e.file_name().to_string_lossy().into_owned();
         if name.starts_with('.') || ["build", "target", "cache"].contains(&name.as_str()) {
             continue;
@@ -746,7 +774,15 @@ impl Default for SceneEditor {
 impl SceneEditor {
     fn open_project(&mut self, project_dir: &Path) {
         let dir = project_dir.join("scenes");
-        let _ = fs::create_dir_all(&dir);
+        if !dir.exists() {
+            let _ = fs::create_dir(&dir);
+        }
+        if !dir.is_dir() || !project_path_is_safe(project_dir, &dir) {
+            self.open = false;
+            self.path = None;
+            self.status = Some("Scene folder is outside the project".into());
+            return;
+        }
         let path = dir.join("main.ic-scene");
         self.nodes.clear();
         self.selected = None;
@@ -791,6 +827,11 @@ impl SceneEditor {
         let Some(path) = self.path.as_ref() else {
             return Err("Scene path is not set".into());
         };
+        if let Some(project) = path.parent().and_then(Path::parent) {
+            if !project_path_is_safe(project, path) {
+                return Err("Scene path is outside the project".into());
+            }
+        }
         let mut out = String::from("# IC 2D scene v1\n# node|name|x|y|width|height|r|g|b\n");
         for node in &self.nodes {
             let name = node.name.replace('|', "%7C").replace('\n', " ");
@@ -1012,7 +1053,9 @@ impl IcApp {
                     err = Some(tr(lang, K::ErrName).to_string());
                 } else {
                     let target = pr.path.join(&text);
-                    if target.exists() {
+                    if !project_path_is_safe(&proj.dir, &target) {
+                        err = Some("Path is outside the project or uses a symbolic link".into());
+                    } else if target.exists() {
                         err = Some(format!("{}: {text}", tr(lang, K::ErrExists)));
                     } else if pr.kind == PromptKind::NewFile {
                         match fs::write(&target, "") {
@@ -1028,6 +1071,10 @@ impl IcApp {
                 let new = pr.path.with_file_name(&text);
                 if !valid_name(&text) {
                     err = Some(tr(lang, K::ErrName).to_string());
+                } else if !project_path_is_safe(&proj.dir, &pr.path)
+                    || !project_path_is_safe(&proj.dir, &new)
+                {
+                    err = Some("Path is outside the project or uses a symbolic link".into());
                 } else if new.exists() {
                     err = Some(format!("{}: {text}", tr(lang, K::ErrExists)));
                 } else if let Err(e) = fs::rename(&pr.path, &new) {
@@ -1054,6 +1101,12 @@ impl IcApp {
                 }
             }
             PromptKind::Delete => {
+                if !project_path_is_safe(&proj.dir, &pr.path) {
+                    err = Some("Refusing to delete a path outside the project".into());
+                    // Keep the delete prompt open; no filesystem operation is performed.
+                    self.prompt = Some(Prompt { error: err, ..pr });
+                    return;
+                }
                 let r = if pr.path.is_dir() {
                     fs::remove_dir_all(&pr.path)
                 } else {
@@ -1095,7 +1148,14 @@ impl IcApp {
     fn open_project(&mut self, dir: PathBuf) {
         let lang = self.settings.lang;
         self.scene_editor.open = false;
-        if !dir.join("main.lua").is_file() {
+        let dir = match fs::canonicalize(&dir) {
+            Ok(path) => path,
+            Err(e) => {
+                self.start_error = Some(format!("{}: {e}", tr(lang, K::ErrNotProject)));
+                return;
+            }
+        };
+        if !dir.join("main.lua").is_file() || !project_path_is_safe(&dir, &dir.join("main.lua")) {
             self.start_error = Some(tr(lang, K::ErrNotProject).to_string());
             return;
         }
@@ -1105,7 +1165,13 @@ impl IcApp {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "project".into());
-        let kind_label = kind_label(lang, &ProjectSettings::load(&dir).0);
+        let settings_path = dir.join(ProjectSettings::FILE);
+        let settings = if project_path_is_safe(&dir, &settings_path) {
+            ProjectSettings::load(&dir).0
+        } else {
+            ProjectSettings::default()
+        };
+        let kind_label = kind_label(lang, &settings);
         let mut proj = Project {
             dir: dir.clone(),
             name,
@@ -1130,6 +1196,10 @@ impl IcApp {
         self.save();
         let lang = self.settings.lang;
         if let Some(p) = self.project.as_mut() {
+            if !project_path_is_safe(&p.dir, &path) {
+                self.log.push("open refused: file is outside the project".into());
+                return;
+            }
             load_file(p, path, lang);
             if let Some(o) = p.open.clone() {
                 p.selected = o;
@@ -1165,7 +1235,8 @@ impl IcApp {
         };
         if (!source.is_file() && !source.is_dir())
             || !destination_dir.is_dir()
-            || !source.starts_with(&proj.dir)
+            || !project_path_is_safe(&proj.dir, &source)
+            || !project_path_is_safe(&proj.dir, &destination_dir)
             || destination_dir.starts_with(&source)
             || source.parent() == Some(destination_dir.as_path())
         {
@@ -1213,6 +1284,10 @@ impl IcApp {
             return;
         }
         if let Some(path) = &p.open {
+            if !project_path_is_safe(&p.dir, path) {
+                self.log.push("save refused: file is outside the project".into());
+                return;
+            }
             match fs::write(path, &p.text) {
                 Ok(()) => p.dirty = false,
                 Err(e) => self.log.push(format!("save error: {e}")),
@@ -1321,9 +1396,15 @@ impl IcApp {
                     .as_ref()
                     .map(|p| (p.dir.clone(), p.name.clone()))
                 {
+                    let settings_path = dir.join(ProjectSettings::FILE);
+                    let settings = if project_path_is_safe(&dir, &settings_path) {
+                        ProjectSettings::load(&dir).0
+                    } else {
+                        ProjectSettings::default()
+                    };
                     self.settings_draft = Some(SettingsDraft {
                         name,
-                        s: ProjectSettings::load(&dir).0,
+                        s: settings,
                     });
                 }
             }
@@ -1338,6 +1419,11 @@ impl IcApp {
                 let new_name = draft.name.trim().to_string();
                 if new_name.is_empty() || new_name.contains(['/', '\\']) {
                     self.log.push(tr(lang, K::ErrName).to_string());
+                    self.settings_draft = Some(draft);
+                    return;
+                }
+                if !project_path_is_safe(&proj.dir, &proj.dir.join(ProjectSettings::FILE)) {
+                    self.log.push("Settings save refused: path is outside the project".into());
                     self.settings_draft = Some(draft);
                     return;
                 }
@@ -1735,7 +1821,12 @@ impl eframe::App for IcApp {
         if !dropped_files.is_empty() {
             if let Some(proj) = self.project.as_mut() {
                 let assets = proj.dir.join("assets");
-                let _ = fs::create_dir_all(&assets);
+                if !assets.exists() {
+                    let _ = fs::create_dir(&assets);
+                }
+                if !assets.is_dir() || !project_path_is_safe(&proj.dir, &assets) {
+                    self.log.push("Import refused: assets folder is outside the project".into());
+                } else {
                 for dropped in dropped_files {
                     let name = dropped
                         .path
@@ -1747,10 +1838,21 @@ impl eframe::App for IcApp {
                             if dropped.name.is_empty() {
                                 "dropped_asset.bin".into()
                             } else {
-                                dropped.name.clone()
+                                // Берём только имя файла, чтобы имя из drag-and-drop
+                                // не могло подставить ../ или путь к другой папке.
+                                dropped.name.replace('\\\\', "/")
+                                    .rsplit('/')
+                                    .next()
+                                    .filter(|name| !name.is_empty() && *name != "." && *name != "..")
+                                    .unwrap_or("dropped_asset.bin")
+                                    .to_string()
                             }
                         });
                     let destination = unique_path(&assets, &name);
+                    if !project_path_is_safe(&proj.dir, &destination) {
+                        self.log.push("Import refused: destination is outside the project".into());
+                        continue;
+                    }
                     let result = if let Some(source) = dropped.path.as_ref() {
                         if source.is_file() {
                             fs::copy(source, &destination).map(|_| ())
@@ -1768,6 +1870,7 @@ impl eframe::App for IcApp {
                             .push(format!("Imported: {}", destination.display())),
                         Err(e) => self.log.push(format!("Import error: {e}")),
                     }
+                }
                 }
                 proj.files.clear();
                 scan(&proj.dir, 0, &mut proj.files);

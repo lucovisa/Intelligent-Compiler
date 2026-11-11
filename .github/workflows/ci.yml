@@ -46,13 +46,17 @@ jobs:
         include:
           - os: windows-latest
             name: windows
+            display_name: Windows
             ext: ".exe"
           - os: ubuntu-latest
             name: linux
+            display_name: Линукс
             ext: ""
           - os: macos-latest
             name: macos
+            display_name: macOS
             ext: ""
+    name: ${{ matrix.display_name }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
