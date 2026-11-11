@@ -1,4 +1,4 @@
--- IC demo: 10 000 летающих квадратов на Lua. WASD — двигать, Esc — выход.
+-- IC demo
 ic.title = "IC Demo (Lua)"
 
 local COUNT = 10000

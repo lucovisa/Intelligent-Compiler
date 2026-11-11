@@ -1,4 +1,3 @@
-// #компиляция #стиль #гравитация
 // IC Engine main GUI module
 use eframe::egui;
 
@@ -23,7 +22,7 @@ struct IcApp {
     show_scene_view: bool,
     is_game: bool,
     ask_default_code: bool,
-    // Settings parameters (Removed "Тип проекта" & "Название типа" per request)
+    // Settings parameters
     proj_name: String,
     window_title: String,
     window_w: u32,
@@ -61,7 +60,7 @@ impl Default for IcApp {
 
 impl eframe::App for IcApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // #стиль
+        // Стиль
         if self.dark_mode {
             ctx.set_visuals(egui::Visuals::dark());
         } else {
@@ -71,7 +70,7 @@ impl eframe::App for IcApp {
         // Верхняя панель управления
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // Иконка: Шестеренка с лампочкой ⚙💡 (Собственная иконка IC Engine)
+                // Иконки
                 ui.label(egui::RichText::new("⚙💡 IC").bold().size(18.0));
                 ui.separator();
                 
@@ -102,7 +101,7 @@ impl eframe::App for IcApp {
             });
         });
 
-        // Левая панель - Проводник в стиле VS Code & Узлы Сцены (Godot-style)
+        // Левая панель - ну да почитай код
         egui::SidePanel::left("left_panel").resizable(true).default_width(230.0).show(ctx, |ui| {
             ui.heading("Проводник");
             ui.horizontal(|ui| {
@@ -188,7 +187,7 @@ impl eframe::App for IcApp {
                 });
         }
 
-        // Диалог настроек (Убран тип проекта и название типа по вашему требованию)
+        // Диалог настроек 
         if self.show_settings_dialog {
             egui::Window::new("Настройки проекта")
                 .collapsible(false)
