@@ -1,7 +1,8 @@
-// IC Engine main GUI module
+// IC Engine main GUI entry point
 use eframe::egui;
 
 fn main() -> Result<(), eframe::Error> {
+    // #компиляция
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1150.0, 720.0])
@@ -11,18 +12,18 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "IC Engine",
         options,
-        Box::new(|_cc| Box::new(IcApp::default())),
+        Box::new(|_cc| Ok(Box::new(IcApp::default()))),
     )
 }
 
 struct IcApp {
+    // стиль
     dark_mode: bool,
     show_new_project_dialog: bool,
     show_settings_dialog: bool,
     show_scene_view: bool,
     is_game: bool,
     ask_default_code: bool,
-    // Settings parameters
     proj_name: String,
     window_title: String,
     window_w: u32,
@@ -53,25 +54,25 @@ impl Default for IcApp {
             build_target: "Эта система".to_string(),
             active_tab: "main.lua".to_string(),
             code_content: "-- #компиляция #стиль #гравитация\nlocal player = { x = 400, y = 300, vy = 0 }\nlocal gravity = 9.8\n\nfunction ic.update(dt)\n    -- #гравитация\n    player.vy = player.vy + gravity * dt\n    player.y = player.y + player.vy * dt\nend\n\nfunction ic.draw()\n    -- #стиль\n    ic.rect(player.x, player.y, 40, 40, 1.0, 0.5, 0.2, 1.0)\nend".to_string(),
-            logs: vec!["[IC Engine] Инициализация успешна. За пределы папки движок не выходит!".to_string()],
+            logs: vec!["[IC Engine] Инициализация успешна. Движок полностью автономный.".to_string()],
         }
     }
 }
 
 impl eframe::App for IcApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Стиль
+        // стиль
         if self.dark_mode {
             ctx.set_visuals(egui::Visuals::dark());
         } else {
             ctx.set_visuals(egui::Visuals::light());
         }
 
-        // Верхняя панель управления
+        // Верхняя панель
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // Иконки
-                ui.label(egui::RichText::new("⚙💡 IC").bold().size(18.0));
+                // стиль
+                ui.label(egui::RichText::new("⚙💡 IC Engine").strong().size(18.0));
                 ui.separator();
                 
                 if ui.button("📁 Новый проект").clicked() {
@@ -83,13 +84,13 @@ impl eframe::App for IcApp {
                 }
 
                 if ui.button("▶ Запустить (F5)").clicked() {
-                    // #компиляция
-                    self.logs.push("[Запуск] Скрипт запущен локально в папке проекта.".to_string());
+                    // компиляция
+                    self.logs.push("[Запуск] Запуск проекта из текущей папки...".to_string());
                 }
 
                 if ui.button("📦 Собрать exe").clicked() {
-                    // #компиляция
-                    self.logs.push(format!("[Сборка] Проект '{}' собран в один файл!", self.proj_name));
+                    // компиляция
+                    self.logs.push(format!("[Сборка] Выполняется сборка проекта '{}'...", self.proj_name));
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -101,7 +102,7 @@ impl eframe::App for IcApp {
             });
         });
 
-        // Левая панель - ну да почитай код
+        // Проводник слева 
         egui::SidePanel::left("left_panel").resizable(true).default_width(230.0).show(ctx, |ui| {
             ui.heading("Проводник");
             ui.horizontal(|ui| {
@@ -127,7 +128,7 @@ impl eframe::App for IcApp {
             ui.label(" └── RigidBody2D (Физика)");
         });
 
-        // Центральная область редактора и сцены
+        // Центральная область
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.show_scene_view, true, "🎬 Сцена (Godot View)");
@@ -136,7 +137,6 @@ impl eframe::App for IcApp {
             ui.separator();
 
             if self.show_scene_view {
-                // Визуальный редактор сцены
                 ui.vertical_centered(|ui| {
                     let (rect, _) = ui.allocate_at_least(egui::vec2(640.0, 360.0), egui::Sense::drag());
                     ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(20, 20, 25));
@@ -144,7 +144,6 @@ impl eframe::App for IcApp {
                     ui.label("Перетаскивайте объекты на сцене мышью");
                 });
             } else {
-                // Текстовый редактор кода
                 ui.add(
                     egui::TextEdit::multiline(&mut self.code_content)
                         .font(egui::TextStyle::Monospace)
@@ -164,7 +163,6 @@ impl eframe::App for IcApp {
             });
         });
 
-        // Диалог создания нового проекта
         if self.show_new_project_dialog {
             egui::Window::new("Что создаём?")
                 .collapsible(false)
@@ -178,7 +176,7 @@ impl eframe::App for IcApp {
                     ui.horizontal(|ui| {
                         if ui.button("Создать").clicked() {
                             self.show_new_project_dialog = false;
-                            self.logs.push("Проект успешно создан!".to_string());
+                            self.logs.push("Проект создался.".to_string());
                         }
                         if ui.button("Отмена").clicked() {
                             self.show_new_project_dialog = false;
@@ -187,13 +185,12 @@ impl eframe::App for IcApp {
                 });
         }
 
-        // Диалог настроек 
         if self.show_settings_dialog {
             egui::Window::new("Настройки проекта")
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
-                    ui.label("Настройки хранятся в ic.toml в папке проекта. За пределы папки не выходят.");
+                    ui.label("Настройки хранятся в ic.toml в папке проекта.");
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label("Название проекта:");
