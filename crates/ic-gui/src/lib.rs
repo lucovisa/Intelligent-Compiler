@@ -10,7 +10,10 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{mpsc::{channel, Receiver, Sender}, OnceLock},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        OnceLock,
+    },
     thread::{self, JoinHandle},
 };
 
@@ -74,7 +77,6 @@ fn confine_caches() {
     }
 }
 
-
 fn system_prefers_dark() -> bool {
     static SYSTEM_DARK: OnceLock<bool> = OnceLock::new();
     *SYSTEM_DARK.get_or_init(system_prefers_dark_uncached)
@@ -84,23 +86,40 @@ fn system_prefers_dark_uncached() -> bool {
     #[cfg(target_os = "windows")]
     {
         let output = Command::new("reg")
-            .args(["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "/v", "AppsUseLightTheme"])
+            .args([
+                "query",
+                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                "/v",
+                "AppsUseLightTheme",
+            ])
             .output();
         if let Ok(output) = output {
             let value = String::from_utf8_lossy(&output.stdout);
-            if value.contains("0x0") { return true; }
-            if value.contains("0x1") { return false; }
+            if value.contains("0x0") {
+                return true;
+            }
+            if value.contains("0x1") {
+                return false;
+            }
         }
     }
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = Command::new("defaults").args(["read", "-g", "AppleInterfaceStyle"]).output() {
-            return String::from_utf8_lossy(&output.stdout).to_lowercase().contains("dark");
+        if let Ok(output) = Command::new("defaults")
+            .args(["read", "-g", "AppleInterfaceStyle"])
+            .output()
+        {
+            return String::from_utf8_lossy(&output.stdout)
+                .to_lowercase()
+                .contains("dark");
         }
     }
     #[cfg(target_os = "linux")]
     {
-        let home = env::var_os("HOME").unwrap_or_default().to_string_lossy().to_string();
+        let home = env::var_os("HOME")
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let gsettings = Command::new("gsettings")
             .args(["get", "org.gnome.desktop.interface", "color-scheme"])
             .output()
@@ -166,9 +185,18 @@ impl Settings {
             for line in text.lines() {
                 if let Some((k, v)) = line.split_once('=') {
                     match (k.trim(), v.trim()) {
-                        ("theme", "system") => { s.theme_system = true; s.dark = system_prefers_dark(); },
-                        ("theme", "dark") => { s.theme_system = false; s.dark = true; },
-                        ("theme", "light") => { s.theme_system = false; s.dark = false; },
+                        ("theme", "system") => {
+                            s.theme_system = true;
+                            s.dark = system_prefers_dark();
+                        }
+                        ("theme", "dark") => {
+                            s.theme_system = false;
+                            s.dark = true;
+                        }
+                        ("theme", "light") => {
+                            s.theme_system = false;
+                            s.dark = false;
+                        }
                         ("lang", v) => saved_lang = Lang::from_code(v),
                         ("lang_explicit", "true") => s.lang_explicit = true,
                         ("recent", v) if !v.is_empty() => s.recent.push(v.to_string()),
@@ -186,7 +214,13 @@ impl Settings {
     }
 
     fn save(&self) {
-        let theme = if self.theme_system { "system" } else if self.dark { "dark" } else { "light" };
+        let theme = if self.theme_system {
+            "system"
+        } else if self.dark {
+            "dark"
+        } else {
+            "light"
+        };
         let mut out = format!(
             "theme={theme}\nlang={}\nlang_explicit={}\n",
             self.lang.code(),
@@ -356,7 +390,15 @@ fn theme_toggle(ui: &mut egui::Ui, dark: &mut bool, system: &mut bool, tip: &str
     painter.rect_stroke(rect, 4.0, v.bg_stroke);
 
     if resp.clicked() {
-        if *system { *system = false; *dark = true; } else if *dark { *dark = false; } else { *system = true; *dark = system_prefers_dark(); }
+        if *system {
+            *system = false;
+            *dark = true;
+        } else if *dark {
+            *dark = false;
+        } else {
+            *system = true;
+            *dark = system_prefers_dark();
+        }
         true
     } else {
         false
@@ -757,7 +799,11 @@ fn fuzzy_score(candidate: &str, query: &str) -> Option<i32> {
         let relative = candidate[position..].find(ch)?;
         let found = position + relative;
         score += 10;
-        if found == 0 || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'/') || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'_') || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'-') {
+        if found == 0
+            || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'/')
+            || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'_')
+            || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'-')
+        {
             score += 12;
         }
         if previous.is_some_and(|last| found == last + 1) {
@@ -1965,7 +2011,17 @@ impl eframe::App for IcApp {
         let lang = self.settings.lang;
         let dark = self.settings.dark;
         let p = palette(dark);
-        let theme_tip = format!("{}: {}", tr(lang, K::Theme), if self.settings.theme_system { "System" } else if dark { "Dark" } else { "Light" });
+        let theme_tip = format!(
+            "{}: {}",
+            tr(lang, K::Theme),
+            if self.settings.theme_system {
+                "System"
+            } else if dark {
+                "Dark"
+            } else {
+                "Light"
+            }
+        );
 
         egui::TopBottomPanel::top("top")
             .frame(
@@ -2016,7 +2072,12 @@ impl eframe::App for IcApp {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme_toggle(ui, &mut self.settings.dark, &mut self.settings.theme_system, &theme_tip) {
+                        if theme_toggle(
+                            ui,
+                            &mut self.settings.dark,
+                            &mut self.settings.theme_system,
+                            &theme_tip,
+                        ) {
                             changed = true;
                         }
                         egui::ComboBox::from_id_source("lang")
@@ -2540,44 +2601,70 @@ impl eframe::App for IcApp {
         }
         if self.project_search {
             let mut open = true;
-            egui::Window::new(if self.search_current_file { "Find in file" } else { "Search in project" })
-                .open(&mut open)
-                .default_width(680.0)
-                .default_height(480.0)
-                .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Find");
-                        ui.add(egui::TextEdit::singleline(&mut self.project_search_query).hint_text("Search across project files…").desired_width(f32::INFINITY));
-                    });
-                    if let Some(project) = self.project.as_ref() {
-                        let query = self.project_search_query.to_lowercase();
-                        let mut results: Vec<(PathBuf, usize, String)> = Vec::new();
-                        if !query.is_empty() {
-                            for entry in project.files.iter().filter(|entry| !entry.is_dir && (!self.search_current_file || project.open.as_ref() == Some(&entry.path))) {
-                                if let Ok(contents) = fs::read_to_string(&entry.path) {
-                                    for (line_index, line) in contents.lines().enumerate() {
-                                        if line.to_lowercase().contains(&query) {
-                                            results.push((entry.path.clone(), line_index + 1, line.trim().to_string()));
-                                            if results.len() >= 500 { break; }
+            egui::Window::new(if self.search_current_file {
+                "Find in file"
+            } else {
+                "Search in project"
+            })
+            .open(&mut open)
+            .default_width(680.0)
+            .default_height(480.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Find");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.project_search_query)
+                            .hint_text("Search across project files…")
+                            .desired_width(f32::INFINITY),
+                    );
+                });
+                if let Some(project) = self.project.as_ref() {
+                    let query = self.project_search_query.to_lowercase();
+                    let mut results: Vec<(PathBuf, usize, String)> = Vec::new();
+                    if !query.is_empty() {
+                        for entry in project.files.iter().filter(|entry| {
+                            !entry.is_dir
+                                && (!self.search_current_file
+                                    || project.open.as_ref() == Some(&entry.path))
+                        }) {
+                            if let Ok(contents) = fs::read_to_string(&entry.path) {
+                                for (line_index, line) in contents.lines().enumerate() {
+                                    if line.to_lowercase().contains(&query) {
+                                        results.push((
+                                            entry.path.clone(),
+                                            line_index + 1,
+                                            line.trim().to_string(),
+                                        ));
+                                        if results.len() >= 500 {
+                                            break;
                                         }
                                     }
                                 }
-                                if results.len() >= 500 { break; }
+                            }
+                            if results.len() >= 500 {
+                                break;
                             }
                         }
-                        ui.label(format!("{} results", results.len()));
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for (path, line, text) in results {
-                                let relative = path.strip_prefix(&project.dir).unwrap_or(&path).display();
-                                if ui.selectable_label(false, format!("{}:{}  {}", relative, line, text)).clicked() {
-                                    action = Some(Action::SelectTab(path));
-                                    self.project_search = false;
-                                }
-                            }
-                        });
                     }
-                });
-            if !open { self.project_search = false; }
+                    ui.label(format!("{} results", results.len()));
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (path, line, text) in results {
+                            let relative =
+                                path.strip_prefix(&project.dir).unwrap_or(&path).display();
+                            if ui
+                                .selectable_label(false, format!("{}:{}  {}", relative, line, text))
+                                .clicked()
+                            {
+                                action = Some(Action::SelectTab(path));
+                                self.project_search = false;
+                            }
+                        }
+                    });
+                }
+            });
+            if !open {
+                self.project_search = false;
+            }
         }
 
         if self.quick_open {
@@ -2597,11 +2684,19 @@ impl eframe::App for IcApp {
                     );
                     if let Some(proj) = self.project.as_ref() {
                         let filter = self.quick_filter.clone();
-                        let mut ranked: Vec<(i32, String, PathBuf)> = proj.files.iter()
+                        let mut ranked: Vec<(i32, String, PathBuf)> = proj
+                            .files
+                            .iter()
                             .filter(|file| !file.is_dir)
                             .filter_map(|file| {
-                                let label = file.path.strip_prefix(&proj.dir).unwrap_or(&file.path).display().to_string();
-                                fuzzy_score(&label, &filter).map(|score| (score, label, file.path.clone()))
+                                let label = file
+                                    .path
+                                    .strip_prefix(&proj.dir)
+                                    .unwrap_or(&file.path)
+                                    .display()
+                                    .to_string();
+                                fuzzy_score(&label, &filter)
+                                    .map(|score| (score, label, file.path.clone()))
                             })
                             .collect();
                         ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -2609,7 +2704,10 @@ impl eframe::App for IcApp {
                             .max_height(360.0)
                             .show(ui, |ui| {
                                 for (_, label, path) in ranked.into_iter().take(100) {
-                                    if ui.selectable_label(proj.open.as_ref() == Some(&path), label).clicked() {
+                                    if ui
+                                        .selectable_label(proj.open.as_ref() == Some(&path), label)
+                                        .clicked()
+                                    {
                                         action = Some(Action::SelectTab(path));
                                         self.quick_open = false;
                                     }
@@ -2631,7 +2729,11 @@ impl eframe::App for IcApp {
                 .default_width(520.0)
                 .anchor(egui::Align2::CENTER_TOP, [0.0, 70.0])
                 .show(ctx, |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.command_filter).hint_text(tr(lang, K::TypeCommand)).desired_width(f32::INFINITY));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.command_filter)
+                            .hint_text(tr(lang, K::TypeCommand))
+                            .desired_width(f32::INFINITY),
+                    );
                     let query = self.command_filter.to_lowercase();
                     let commands = [
                         (tr(lang, K::CommandSave), "save"),
@@ -2644,7 +2746,10 @@ impl eframe::App for IcApp {
                         (tr(lang, K::CommandCloseProject), "close project"),
                     ];
                     for (label, command) in commands {
-                        if !query.is_empty() && !label.to_lowercase().contains(&query) && !command.contains(&query) {
+                        if !query.is_empty()
+                            && !label.to_lowercase().contains(&query)
+                            && !command.contains(&query)
+                        {
                             continue;
                         }
                         if ui.selectable_label(false, label).clicked() {
