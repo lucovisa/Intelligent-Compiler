@@ -91,6 +91,7 @@ fn hide_console(cmd: &mut Command) {
 struct Settings {
     dark: bool,
     lang: Lang,
+    lang_explicit: bool,
     recent: Vec<String>,
 }
 
@@ -99,37 +100,32 @@ impl Settings {
         exe_dir().unwrap_or_default().join("ic-settings.txt")
     }
 
-    fn system_lang() -> Lang {
-        let v = env::var("LC_ALL")
-            .or_else(|_| env::var("LANG"))
-            .unwrap_or_default();
-        if v.starts_with("ru") {
-            Lang::Ru
-        } else {
-            Lang::En
-        }
-    }
-
     fn load() -> Self {
         let mut s = Settings {
             dark: true,
-            lang: Self::system_lang(),
+            lang: Lang::En,
+            lang_explicit: false,
             recent: Vec::new(),
         };
+        let mut saved_lang = None;
         if let Ok(text) = fs::read_to_string(Self::path()) {
             for line in text.lines() {
                 if let Some((k, v)) = line.split_once('=') {
                     match (k.trim(), v.trim()) {
                         ("theme", v) => s.dark = v != "light",
-                        ("lang", v) => {
-                            if let Some(l) = Lang::from_code(v) {
-                                s.lang = l;
-                            }
-                        }
+                        ("lang", v) => saved_lang = Lang::from_code(v),
+                        ("lang_explicit", "true") => s.lang_explicit = true,
                         ("recent", v) if !v.is_empty() => s.recent.push(v.to_string()),
                         _ => {}
                     }
                 }
+            }
+        }
+        // Old versions auto-selected Russian from the OS locale. Ignore that legacy value
+        // once, so fresh upgrades start in English; keep choices made in this version.
+        if s.lang_explicit {
+            if let Some(lang) = saved_lang {
+                s.lang = lang;
             }
         }
         s
@@ -137,7 +133,11 @@ impl Settings {
 
     fn save(&self) {
         let theme = if self.dark { "dark" } else { "light" };
-        let mut out = format!("theme={theme}\nlang={}\n", self.lang.code());
+        let mut out = format!(
+            "theme={theme}\nlang={}\nlang_explicit={}\n",
+            self.lang.code(),
+            self.lang_explicit
+        );
         for r in &self.recent {
             out.push_str(&format!("recent={r}\n"));
         }
@@ -211,9 +211,9 @@ fn setup_style(ctx: &egui::Context, dark: bool) {
         ),
     ]
     .into();
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(12.0, 5.0);
-    style.spacing.interact_size.y = 28.0;
+    style.spacing.item_spacing = egui::vec2(6.0, 4.0);
+    style.spacing.button_padding = egui::vec2(9.0, 4.0);
+    style.spacing.interact_size.y = 25.0;
 
     let mut v = if dark {
         egui::Visuals::dark()
@@ -542,18 +542,6 @@ fn valid_name(s: &str) -> bool {
     !s.is_empty() && !s.contains(['/', '\\']) && s != "." && s != ".."
 }
 
-fn kind_label(lang: Lang, s: &ProjectSettings) -> String {
-    if s.kind == "app" {
-        return tr(lang, K::KindApp).to_string();
-    }
-    let game = tr(lang, K::KindGame);
-    match s.dimension.as_str() {
-        "3d" => format!("{game} 3D"),
-        "custom" if !s.label.is_empty() => format!("{game}: {}", s.label),
-        "custom" => game.to_string(),
-        _ => format!("{game} 2D"),
-    }
-}
 
 fn file_color(name: &str) -> Color32 {
     match name.rsplit('.').next().unwrap_or("") {
@@ -574,8 +562,8 @@ fn explorer_rows(
     action: &mut Option<Action>,
 ) {
     let pal = palette(dark);
-    let row_h = 22.0;
-    let indent = 14.0;
+    let row_h = 20.0;
+    let indent = 12.0;
     let text_color = ui.visuals().text_color();
     let folder_color = Color32::from_rgb(0xDC, 0xB6, 0x7A);
     let mut skip: Option<usize> = None;
@@ -650,7 +638,7 @@ fn explorer_rows(
                 egui::pos2(x + 38.0, cy),
                 egui::Align2::LEFT_CENTER,
                 &f.name,
-                egui::FontId::proportional(14.0),
+                egui::FontId::proportional(13.0),
                 color,
             );
         }
@@ -718,7 +706,6 @@ struct Project {
     note: Option<String>,
     collapsed: HashSet<PathBuf>,
     selected: PathBuf,
-    kind_label: String,
 }
 
 fn load_file(proj: &mut Project, path: PathBuf, lang: Lang) {
@@ -965,6 +952,7 @@ struct IcApp {
     quick_open: bool,
     quick_filter: String,
     scene_editor: SceneEditor,
+    window_title: String,
 }
 
 impl IcApp {
@@ -995,6 +983,7 @@ impl IcApp {
             quick_open: false,
             quick_filter: String::new(),
             scene_editor: SceneEditor::default(),
+            window_title: "IC".into(),
         }
     }
 
@@ -1165,13 +1154,6 @@ impl IcApp {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "project".into());
-        let settings_path = dir.join(ProjectSettings::FILE);
-        let settings = if project_path_is_safe(&dir, &settings_path) {
-            ProjectSettings::load(&dir).0
-        } else {
-            ProjectSettings::default()
-        };
-        let kind_label = kind_label(lang, &settings);
         let mut proj = Project {
             dir: dir.clone(),
             name,
@@ -1183,10 +1165,10 @@ impl IcApp {
             note: None,
             collapsed: HashSet::new(),
             selected: dir.clone(),
-            kind_label,
         };
         load_file(&mut proj, dir.join("main.lua"), lang);
         self.project = Some(proj);
+        self.scene_editor.open_project(&dir);
         self.start_error = None;
         self.settings.push_recent(&dir);
         self.settings.save();
@@ -1197,8 +1179,7 @@ impl IcApp {
         let lang = self.settings.lang;
         if let Some(p) = self.project.as_mut() {
             if !project_path_is_safe(&p.dir, &path) {
-                self.log
-                    .push("open refused: file is outside the project".into());
+                self.log.push("open refused: file is outside the project".into());
                 return;
             }
             load_file(p, path, lang);
@@ -1286,8 +1267,7 @@ impl IcApp {
         }
         if let Some(path) = &p.open {
             if !project_path_is_safe(&p.dir, path) {
-                self.log
-                    .push("save refused: file is outside the project".into());
+                self.log.push("save refused: file is outside the project".into());
                 return;
             }
             match fs::write(path, &p.text) {
@@ -1404,7 +1384,10 @@ impl IcApp {
                     } else {
                         ProjectSettings::default()
                     };
-                    self.settings_draft = Some(SettingsDraft { name, s: settings });
+                    self.settings_draft = Some(SettingsDraft {
+                        name,
+                        s: settings,
+                    });
                 }
             }
             Action::SaveSettings => {
@@ -1422,8 +1405,7 @@ impl IcApp {
                     return;
                 }
                 if !project_path_is_safe(&proj.dir, &proj.dir.join(ProjectSettings::FILE)) {
-                    self.log
-                        .push("Settings save refused: path is outside the project".into());
+                    self.log.push("Settings save refused: path is outside the project".into());
                     self.settings_draft = Some(draft);
                     return;
                 }
@@ -1473,7 +1455,6 @@ impl IcApp {
                 }
                 proj.files.clear();
                 scan(&proj.dir, 0, &mut proj.files);
-                proj.kind_label = kind_label(lang, &draft.s);
                 let toml = proj.dir.join(ProjectSettings::FILE);
                 if proj.open.as_ref() == Some(&toml) && !proj.dirty {
                     load_file(proj, toml, lang);
@@ -1535,13 +1516,18 @@ impl IcApp {
         if !self.scene_editor.open {
             return;
         }
+        let scene_title = self
+            .project
+            .as_ref()
+            .map(|project| format!("IC - {} — Scene", project.name))
+            .unwrap_or_else(|| "IC - Scene".to_string());
         let scene = &mut self.scene_editor;
         let scene_file_before = scene.path.as_ref().is_some_and(|path| path.is_file());
         let viewport_id = egui::ViewportId::from_hash_of("ic_scene_editor");
         let builder = egui::ViewportBuilder::default()
-            .with_title(tr(lang, K::SceneEditor))
-            .with_inner_size([1120.0, 720.0])
-            .with_min_inner_size([820.0, 520.0]);
+            .with_title(scene_title)
+            .with_inner_size([1240.0, 780.0])
+            .with_min_inner_size([900.0, 580.0]);
 
         ctx.show_viewport_immediate(viewport_id, builder, |scene_ctx, _class| {
             if scene_ctx.input(|i| i.viewport().close_requested()) {
@@ -1597,8 +1583,8 @@ impl IcApp {
 
             egui::SidePanel::left("scene_hierarchy")
                 .resizable(true)
-                .default_width(210.0)
-                .width_range(150.0..=420.0)
+                .default_width(190.0)
+                .width_range(150.0..=320.0)
                 .frame(
                     egui::Frame::none()
                         .fill(panel)
@@ -1625,8 +1611,8 @@ impl IcApp {
 
             egui::SidePanel::right("scene_inspector")
                 .resizable(true)
-                .default_width(250.0)
-                .width_range(190.0..=480.0)
+                .default_width(230.0)
+                .width_range(180.0..=400.0)
                 .frame(
                     egui::Frame::none()
                         .fill(panel)
@@ -1825,58 +1811,52 @@ impl eframe::App for IcApp {
                     let _ = fs::create_dir(&assets);
                 }
                 if !assets.is_dir() || !project_path_is_safe(&proj.dir, &assets) {
-                    self.log
-                        .push("Import refused: assets folder is outside the project".into());
+                    self.log.push("Import refused: assets folder is outside the project".into());
                 } else {
-                    for dropped in dropped_files {
-                        let name = dropped
-                            .path
-                            .as_ref()
-                            .and_then(|p| p.file_name())
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .filter(|n| !n.is_empty())
-                            .unwrap_or_else(|| {
-                                if dropped.name.is_empty() {
-                                    "dropped_asset.bin".into()
-                                } else {
-                                    // Берём только имя файла, чтобы имя из drag-and-drop
-                                    // не могло подставить ../ или путь к другой папке.
-                                    dropped
-                                        .name
-                                        .replace('\\', "/")
-                                        .rsplit('/')
-                                        .next()
-                                        .filter(|name| {
-                                            !name.is_empty() && *name != "." && *name != ".."
-                                        })
-                                        .unwrap_or("dropped_asset.bin")
-                                        .to_string()
-                                }
-                            });
-                        let destination = unique_path(&assets, &name);
-                        if !project_path_is_safe(&proj.dir, &destination) {
-                            self.log
-                                .push("Import refused: destination is outside the project".into());
-                            continue;
-                        }
-                        let result = if let Some(source) = dropped.path.as_ref() {
-                            if source.is_file() {
-                                fs::copy(source, &destination).map(|_| ())
+                for dropped in dropped_files {
+                    let name = dropped
+                        .path
+                        .as_ref()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or_else(|| {
+                            if dropped.name.is_empty() {
+                                "dropped_asset.bin".into()
                             } else {
-                                continue;
+                                // Берём только имя файла, чтобы имя из drag-and-drop
+                                // не могло подставить ../ или путь к другой папке.
+                                dropped.name.replace('\\', "/")
+                                    .rsplit('/')
+                                    .next()
+                                    .filter(|name| !name.is_empty() && *name != "." && *name != "..")
+                                    .unwrap_or("dropped_asset.bin")
+                                    .to_string()
                             }
-                        } else if let Some(bytes) = dropped.bytes.as_ref() {
-                            fs::write(&destination, bytes.as_ref())
+                        });
+                    let destination = unique_path(&assets, &name);
+                    if !project_path_is_safe(&proj.dir, &destination) {
+                        self.log.push("Import refused: destination is outside the project".into());
+                        continue;
+                    }
+                    let result = if let Some(source) = dropped.path.as_ref() {
+                        if source.is_file() {
+                            fs::copy(source, &destination).map(|_| ())
                         } else {
                             continue;
-                        };
-                        match result {
-                            Ok(()) => self
-                                .log
-                                .push(format!("Imported: {}", destination.display())),
-                            Err(e) => self.log.push(format!("Import error: {e}")),
                         }
+                    } else if let Some(bytes) = dropped.bytes.as_ref() {
+                        fs::write(&destination, bytes.as_ref())
+                    } else {
+                        continue;
+                    };
+                    match result {
+                        Ok(()) => self
+                            .log
+                            .push(format!("Imported: {}", destination.display())),
+                        Err(e) => self.log.push(format!("Import error: {e}")),
                     }
+                }
                 }
                 proj.files.clear();
                 scan(&proj.dir, 0, &mut proj.files);
@@ -1890,6 +1870,15 @@ impl eframe::App for IcApp {
         let mut action: Option<Action> = None;
         let mut changed = false;
         let has_project = self.project.is_some();
+        let window_title = self
+            .project
+            .as_ref()
+            .map(|project| format!("IC - \"{}\"", project.name))
+            .unwrap_or_else(|| "IC".to_string());
+        if self.window_title != window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(window_title.clone()));
+            self.window_title = window_title;
+        }
         let lang = self.settings.lang;
         let dark = self.settings.dark;
         let p = palette(dark);
@@ -1907,9 +1896,7 @@ impl eframe::App for IcApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if let Some(proj) = &self.project {
-                        ui.label(RichText::new(proj.name.as_str()).weak());
-                        ui.add_space(10.0);
+                    if self.project.is_some() {
                         if button(ui, tr(lang, K::Save))
                             .on_hover_text("Ctrl+S")
                             .clicked()
@@ -1957,6 +1944,7 @@ impl eframe::App for IcApp {
                                         .selectable_value(&mut self.settings.lang, l, l.label())
                                         .clicked()
                                     {
+                                        self.settings.lang_explicit = true;
                                         changed = true;
                                     }
                                 }
@@ -2044,8 +2032,8 @@ impl eframe::App for IcApp {
         if has_project {
             egui::TopBottomPanel::bottom("log")
                 .resizable(true)
-                .default_height(150.0)
-                .min_height(60.0)
+                .default_height(118.0)
+                .min_height(48.0)
                 .frame(
                     egui::Frame::none()
                         .fill(p.panel)
@@ -2072,11 +2060,12 @@ impl eframe::App for IcApp {
 
             egui::SidePanel::left("files")
                 .resizable(true)
-                .default_width(240.0)
+                .default_width(190.0)
+                .width_range(150.0..=300.0)
                 .frame(
                     egui::Frame::none()
                         .fill(p.panel)
-                        .inner_margin(Margin::symmetric(0.0, 8.0)),
+                        .inner_margin(Margin::symmetric(0.0, 6.0)),
                 )
                 .show(ctx, |ui| {
                     let Some(proj) = self.project.as_ref() else {
@@ -2090,15 +2079,12 @@ impl eframe::App for IcApp {
                             .unwrap_or_else(|| proj.dir.clone());
                     }
                     ui.horizontal(|ui| {
-                        ui.add_space(12.0);
+                        ui.add_space(10.0);
                         ui.label(RichText::new(tr(lang, K::Explorer)).small().strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(proj.name.as_str()).small().weak());
-                        });
                     });
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
                         if ui.small_button(tr(lang, K::NewFileShort)).clicked() {
                             action = Some(Action::PromptOpen(PromptKind::NewFile, base.clone()));
                         }
@@ -2114,11 +2100,7 @@ impl eframe::App for IcApp {
                             }
                         });
                     });
-                    ui.horizontal(|ui| {
-                        ui.add_space(12.0);
-                        ui.label(RichText::new(proj.kind_label.as_str()).small().weak());
-                    });
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
                     ui.separator();
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
@@ -2147,16 +2129,12 @@ impl eframe::App for IcApp {
                     let Some(proj) = self.project.as_mut() else {
                         return;
                     };
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("IC / EDITOR").small().weak());
-                        if proj.dirty {
-                            ui.label(
-                                RichText::new(format!("● {}", tr(lang, K::Unsaved)))
-                                    .color(Color32::from_rgb(0xE5, 0xA0, 0x3B)),
-                            );
-                        }
-                    });
-                    ui.add_space(4.0);
+                    if proj.dirty {
+                        ui.label(
+                            RichText::new(format!("● {}", tr(lang, K::Unsaved)))
+                                .color(Color32::from_rgb(0xE5, 0xA0, 0x3B)),
+                        );
+                    }
                     egui::Frame::none()
                         .fill(p.panel)
                         .rounding(Rounding::same(5.0))
@@ -2624,8 +2602,8 @@ pub fn run() -> eframe::Result<()> {
     confine_caches();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1000.0, 680.0])
-            .with_min_inner_size([880.0, 480.0])
+            .with_inner_size([1180.0, 760.0])
+            .with_min_inner_size([980.0, 560.0])
             .with_title("IC")
             .with_icon(egui::IconData {
                 rgba: ICON_RGBA.to_vec(),

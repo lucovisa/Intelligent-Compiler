@@ -5,7 +5,7 @@ pub enum Lang {
 }
 
 impl Lang {
-    pub const ALL: [Lang; 2] = [Lang::Ru, Lang::En];
+    pub const ALL: [Lang; 2] = [Lang::En, Lang::Ru];
 
     pub fn label(self) -> &'static str {
         match self {

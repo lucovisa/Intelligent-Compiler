@@ -50,7 +50,7 @@ jobs:
             ext: ".exe"
           - os: ubuntu-latest
             name: linux
-            display_name: Линукс
+            display_name: Linux
             ext: ""
           - os: macos-latest
             name: macos
