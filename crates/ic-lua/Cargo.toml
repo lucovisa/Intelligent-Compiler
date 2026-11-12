@@ -6,5 +6,4 @@ license.workspace = true
 
 [dependencies]
 ic-core = { path = "../ic-core" }
-# vendored: Lua собирается внутрь бинарника, системный Lua не нужен
 mlua = { version = "0.10", features = ["lua54", "vendored"] }
