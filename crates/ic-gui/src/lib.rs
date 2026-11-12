@@ -10,10 +10,7 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        OnceLock,
-    },
+    sync::{mpsc::{channel, Receiver, Sender}, OnceLock},
     thread::{self, JoinHandle},
 };
 
@@ -77,6 +74,7 @@ fn confine_caches() {
     }
 }
 
+
 fn system_prefers_dark() -> bool {
     static SYSTEM_DARK: OnceLock<bool> = OnceLock::new();
     *SYSTEM_DARK.get_or_init(system_prefers_dark_uncached)
@@ -86,40 +84,23 @@ fn system_prefers_dark_uncached() -> bool {
     #[cfg(target_os = "windows")]
     {
         let output = Command::new("reg")
-            .args([
-                "query",
-                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                "/v",
-                "AppsUseLightTheme",
-            ])
+            .args(["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "/v", "AppsUseLightTheme"])
             .output();
         if let Ok(output) = output {
             let value = String::from_utf8_lossy(&output.stdout);
-            if value.contains("0x0") {
-                return true;
-            }
-            if value.contains("0x1") {
-                return false;
-            }
+            if value.contains("0x0") { return true; }
+            if value.contains("0x1") { return false; }
         }
     }
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = Command::new("defaults")
-            .args(["read", "-g", "AppleInterfaceStyle"])
-            .output()
-        {
-            return String::from_utf8_lossy(&output.stdout)
-                .to_lowercase()
-                .contains("dark");
+        if let Ok(output) = Command::new("defaults").args(["read", "-g", "AppleInterfaceStyle"]).output() {
+            return String::from_utf8_lossy(&output.stdout).to_lowercase().contains("dark");
         }
     }
     #[cfg(target_os = "linux")]
     {
-        let home = env::var_os("HOME")
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+        let home = env::var_os("HOME").unwrap_or_default().to_string_lossy().to_string();
         let gsettings = Command::new("gsettings")
             .args(["get", "org.gnome.desktop.interface", "color-scheme"])
             .output()
@@ -185,18 +166,9 @@ impl Settings {
             for line in text.lines() {
                 if let Some((k, v)) = line.split_once('=') {
                     match (k.trim(), v.trim()) {
-                        ("theme", "system") => {
-                            s.theme_system = true;
-                            s.dark = system_prefers_dark();
-                        }
-                        ("theme", "dark") => {
-                            s.theme_system = false;
-                            s.dark = true;
-                        }
-                        ("theme", "light") => {
-                            s.theme_system = false;
-                            s.dark = false;
-                        }
+                        ("theme", "system") => { s.theme_system = true; s.dark = system_prefers_dark(); },
+                        ("theme", "dark") => { s.theme_system = false; s.dark = true; },
+                        ("theme", "light") => { s.theme_system = false; s.dark = false; },
                         ("lang", v) => saved_lang = Lang::from_code(v),
                         ("lang_explicit", "true") => s.lang_explicit = true,
                         ("recent", v) if !v.is_empty() => s.recent.push(v.to_string()),
@@ -214,13 +186,7 @@ impl Settings {
     }
 
     fn save(&self) {
-        let theme = if self.theme_system {
-            "system"
-        } else if self.dark {
-            "dark"
-        } else {
-            "light"
-        };
+        let theme = if self.theme_system { "system" } else if self.dark { "dark" } else { "light" };
         let mut out = format!(
             "theme={theme}\nlang={}\nlang_explicit={}\n",
             self.lang.code(),
@@ -390,15 +356,7 @@ fn theme_toggle(ui: &mut egui::Ui, dark: &mut bool, system: &mut bool, tip: &str
     painter.rect_stroke(rect, 4.0, v.bg_stroke);
 
     if resp.clicked() {
-        if *system {
-            *system = false;
-            *dark = true;
-        } else if *dark {
-            *dark = false;
-        } else {
-            *system = true;
-            *dark = system_prefers_dark();
-        }
+        if *system { *system = false; *dark = true; } else if *dark { *dark = false; } else { *system = true; *dark = system_prefers_dark(); }
         true
     } else {
         false
@@ -637,11 +595,22 @@ fn valid_name(s: &str) -> bool {
 }
 
 fn file_color(name: &str) -> Color32 {
-    match name.rsplit('.').next().unwrap_or("") {
+    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
         "lua" => Color32::from_rgb(0x51, 0xA0, 0xCF),
+        "rs" => Color32::from_rgb(0xDE, 0x6A, 0x35),
+        "cpp" | "cc" | "cxx" | "hpp" | "h" => Color32::from_rgb(0x65, 0x9A, 0xD8),
+        "c" => Color32::from_rgb(0x8A, 0xA6, 0xC1),
         "toml" => Color32::from_rgb(0xC0, 0x7A, 0x3A),
-        "md" => Color32::from_rgb(0x6C, 0xB6, 0xFF),
+        "md" | "mdx" => Color32::from_rgb(0x6C, 0xB6, 0xFF),
         "json" => Color32::from_rgb(0xE5, 0xC0, 0x5A),
+        "js" | "jsx" | "mjs" => Color32::from_rgb(0xD7, 0xB9, 0x4A),
+        "ts" | "tsx" => Color32::from_rgb(0x3F, 0x83, 0xC9),
+        "py" => Color32::from_rgb(0x4B, 0x9B, 0x79),
+        "html" | "htm" => Color32::from_rgb(0xE1, 0x7B, 0x45),
+        "css" | "scss" => Color32::from_rgb(0xA5, 0x75, 0xC5),
+        "yml" | "yaml" => Color32::from_rgb(0xB5, 0x78, 0xA5),
+        "wgsl" | "glsl" | "vert" | "frag" => Color32::from_rgb(0xB0, 0x83, 0xD4),
+        "png" | "jpg" | "jpeg" | "webp" | "svg" => Color32::from_rgb(0x64, 0xB5, 0x8A),
         _ => Color32::from_rgb(0x8A, 0x8F, 0x98),
     }
 }
@@ -722,10 +691,27 @@ fn explorer_rows(
                 painter.rect_filled(tab, 1.0, folder_color);
             } else {
                 let body = egui::Rect::from_min_size(
-                    egui::pos2(x + 20.0, cy - 6.5),
-                    egui::vec2(10.0, 13.0),
+                    egui::pos2(x + 18.0, cy - 7.0),
+                    egui::vec2(22.0, 14.0),
                 );
-                painter.rect_filled(body, 2.0, file_color(&f.name));
+                let ext = f.name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+                let glyph = match ext.as_str() {
+                    "cpp" | "cc" | "cxx" | "hpp" | "h" => "C++",
+                    "rs" => "Rs",
+                    "lua" => "Lu",
+                    "js" | "jsx" | "mjs" => "JS",
+                    "ts" | "tsx" => "TS",
+                    "py" => "Py",
+                    "json" => "{}",
+                    "toml" => "T",
+                    "md" | "mdx" => "M",
+                    "html" | "htm" => "5",
+                    "css" | "scss" => "#",
+                    "wgsl" | "glsl" => "◇",
+                    _ => "·",
+                };
+                painter.rect_filled(body, 3.0, file_color(&f.name).gamma_multiply(0.22));
+                painter.text(body.center(), egui::Align2::CENTER_CENTER, glyph, FontId::proportional(9.0), file_color(&f.name));
             }
             painter.text(
                 egui::pos2(x + 38.0, cy),
@@ -799,11 +785,7 @@ fn fuzzy_score(candidate: &str, query: &str) -> Option<i32> {
         let relative = candidate[position..].find(ch)?;
         let found = position + relative;
         score += 10;
-        if found == 0
-            || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'/')
-            || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'_')
-            || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'-')
-        {
+        if found == 0 || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'/') || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'_') || candidate.as_bytes().get(found.wrapping_sub(1)) == Some(&b'-') {
             score += 12;
         }
         if previous.is_some_and(|last| found == last + 1) {
@@ -846,6 +828,7 @@ fn load_file(proj: &mut Project, path: PathBuf, lang: Lang) {
 
 #[derive(Clone)]
 struct SceneNode {
+    kind: String,
     name: String,
     x: f32,
     y: f32,
@@ -902,21 +885,23 @@ impl SceneEditor {
                 .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
             {
                 let parts: Vec<_> = line.split('|').collect();
-                if parts.len() != 9 || parts[0] != "node" {
+                if (parts.len() != 9 && parts.len() != 10) || parts[0] != "node" {
                     continue;
                 }
+                let offset = if parts.len() == 10 { 1 } else { 0 };
                 let parsed = (
-                    parts[2].parse::<f32>(),
-                    parts[3].parse::<f32>(),
-                    parts[4].parse::<f32>(),
-                    parts[5].parse::<f32>(),
-                    parts[6].parse::<u8>(),
-                    parts[7].parse::<u8>(),
-                    parts[8].parse::<u8>(),
+                    parts[2 + offset].parse::<f32>(),
+                    parts[3 + offset].parse::<f32>(),
+                    parts[4 + offset].parse::<f32>(),
+                    parts[5 + offset].parse::<f32>(),
+                    parts[6 + offset].parse::<u8>(),
+                    parts[7 + offset].parse::<u8>(),
+                    parts[8 + offset].parse::<u8>(),
                 );
                 if let (Ok(x), Ok(y), Ok(width), Ok(height), Ok(r), Ok(g), Ok(b)) = parsed {
                     self.nodes.push(SceneNode {
-                        name: parts[1].replace("%7C", "|"),
+                        kind: if offset == 1 { parts[1].to_string() } else { "Node2D".to_string() },
+                        name: if offset == 1 { parts[2].replace("%7C", "|") } else { parts[1].replace("%7C", "|") },
                         x,
                         y,
                         width,
@@ -943,7 +928,8 @@ impl SceneEditor {
         for node in &self.nodes {
             let name = node.name.replace('|', "%7C").replace('\n', " ");
             out.push_str(&format!(
-                "node|{}|{:.2}|{:.2}|{:.2}|{:.2}|{}|{}|{}\n",
+                "node|{}|{}|{:.2}|{:.2}|{:.2}|{:.2}|{}|{}|{}\n",
+                node.kind,
                 name,
                 node.x,
                 node.y,
@@ -960,22 +946,30 @@ impl SceneEditor {
         Ok(())
     }
 
-    fn add_node(&mut self) {
+    fn add_node_kind(&mut self, kind: &str) {
         let n = self.nodes.len();
+        let (width, height, color) = match kind {
+            "Camera2D" => (72.0, 52.0, [88, 150, 190]),
+            "Sprite2D" => (88.0, 88.0, [92, 164, 116]),
+            "Area2D" => (112.0, 80.0, [154, 118, 194]),
+            "StaticBody2D" => (112.0, 72.0, [180, 130, 84]),
+            "CharacterBody2D" => (120.0, 84.0, [190, 112, 86]),
+            "CollisionShape2D" => (76.0, 76.0, [190, 170, 82]),
+            "AudioStreamPlayer2D" => (104.0, 54.0, [164, 118, 178]),
+            "Label" => (100.0, 38.0, [88, 132, 190]),
+            "CanvasLayer" => (120.0, 42.0, [100, 150, 160]),
+            _ => (96.0, 64.0, [72, 132, 196]),
+        };
+        let base = kind.to_string();
+        let count = self.nodes.iter().filter(|node| node.kind == kind).count();
         self.nodes.push(SceneNode {
-            name: format!(
-                "Node2D{}",
-                if n == 0 {
-                    String::new()
-                } else {
-                    (n + 1).to_string()
-                }
-            ),
+            kind: base.clone(),
+            name: if count == 0 { base } else { format!("{}{}", base, count + 1) },
             x: 60.0 + n as f32 * 18.0,
             y: 60.0 + n as f32 * 18.0,
-            width: 96.0,
-            height: 64.0,
-            color: [72, 132, 196],
+            width,
+            height,
+            color,
         });
         self.selected = Some(self.nodes.len() - 1);
         self.dirty = true;
@@ -1682,9 +1676,14 @@ impl IcApp {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("IC  /  SCENE").strong());
                         ui.separator();
-                        if primary_button(ui, tr(lang, K::AddSceneNode)).clicked() {
-                            scene.add_node();
-                        }
+                        ui.menu_button(tr(lang, K::AddSceneNode), |ui| {
+                            for kind in ["Node2D", "Sprite2D", "Camera2D", "Area2D", "StaticBody2D", "CharacterBody2D", "CollisionShape2D", "AudioStreamPlayer2D", "Label", "CanvasLayer"] {
+                                if ui.button(kind).clicked() {
+                                    scene.add_node_kind(kind);
+                                    ui.close_menu();
+                                }
+                            }
+                        });
                         if button(ui, tr(lang, K::Save))
                             .on_hover_text("Ctrl+S")
                             .clicked()
@@ -1721,7 +1720,7 @@ impl IcApp {
                     ui.separator();
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for index in 0..scene.nodes.len() {
-                            let label = format!("◇  {}", scene.nodes[index].name);
+                            let label = format!("{}  {}", scene.nodes[index].kind, scene.nodes[index].name);
                             if ui
                                 .selectable_label(scene.selected == Some(index), label)
                                 .clicked()
@@ -1749,6 +1748,19 @@ impl IcApp {
                     ui.separator();
                     if let Some(index) = scene.selected.filter(|i| *i < scene.nodes.len()) {
                         let node = &mut scene.nodes[index];
+                        let mut kind = node.kind.clone();
+                        ui.label("Node type");
+                        egui::ComboBox::from_id_source("scene_node_kind")
+                            .selected_text(&node.kind)
+                            .show_ui(ui, |ui| {
+                                for option in ["Node2D", "Sprite2D", "Camera2D", "Area2D", "StaticBody2D", "CharacterBody2D", "CollisionShape2D", "AudioStreamPlayer2D", "Label", "CanvasLayer"] {
+                                    ui.selectable_value(&mut kind, option.to_string(), option);
+                                }
+                            });
+                        if kind != node.kind {
+                            node.kind = kind;
+                            scene.dirty = true;
+                        }
                         ui.label(tr(lang, K::NodeName));
                         if ui.text_edit_singleline(&mut node.name).changed() {
                             scene.dirty = true;
@@ -2011,17 +2023,7 @@ impl eframe::App for IcApp {
         let lang = self.settings.lang;
         let dark = self.settings.dark;
         let p = palette(dark);
-        let theme_tip = format!(
-            "{}: {}",
-            tr(lang, K::Theme),
-            if self.settings.theme_system {
-                "System"
-            } else if dark {
-                "Dark"
-            } else {
-                "Light"
-            }
-        );
+        let theme_tip = format!("{}: {}", tr(lang, K::Theme), if self.settings.theme_system { "System" } else if dark { "Dark" } else { "Light" });
 
         egui::TopBottomPanel::top("top")
             .frame(
@@ -2059,10 +2061,6 @@ impl eframe::App for IcApp {
                         if button(ui, tr(lang, K::SceneEditor)).clicked() {
                             action = Some(Action::OpenScene);
                         }
-                        if button(ui, &format!("{}  Ctrl+Shift+F", tr(lang, K::Search))).clicked() {
-                            self.search_current_file = false;
-                            self.project_search = true;
-                        }
                         if button(ui, tr(lang, K::ProjSettings)).clicked() {
                             action = Some(Action::OpenSettings);
                         }
@@ -2072,12 +2070,7 @@ impl eframe::App for IcApp {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme_toggle(
-                            ui,
-                            &mut self.settings.dark,
-                            &mut self.settings.theme_system,
-                            &theme_tip,
-                        ) {
+                        if theme_toggle(ui, &mut self.settings.dark, &mut self.settings.theme_system, &theme_tip) {
                             changed = true;
                         }
                         egui::ComboBox::from_id_source("lang")
@@ -2133,14 +2126,9 @@ impl eframe::App for IcApp {
                 self.command_filter.clear();
                 self.command_palette = true;
             }
-            if ctx.input_mut(|i| i.consume_key(command_shift, egui::Key::F)) {
-                self.project_search_query.clear();
-                self.search_current_file = false;
-                self.project_search = true;
-            }
             if ctx.input_mut(|i| i.consume_key(command, egui::Key::F)) {
                 self.project_search_query.clear();
-                self.search_current_file = true;
+                self.search_current_file = false;
                 self.project_search = true;
             }
             if ctx.input_mut(|i| i.consume_key(command_shift, egui::Key::N)) {
@@ -2266,6 +2254,10 @@ impl eframe::App for IcApp {
                     });
                     ui.add_space(4.0);
                     ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        ui.label(RichText::new(format!("▾  📁 {}", proj.name)).strong().small());
+                    });
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
@@ -2601,70 +2593,44 @@ impl eframe::App for IcApp {
         }
         if self.project_search {
             let mut open = true;
-            egui::Window::new(if self.search_current_file {
-                "Find in file"
-            } else {
-                "Search in project"
-            })
-            .open(&mut open)
-            .default_width(680.0)
-            .default_height(480.0)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Find");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.project_search_query)
-                            .hint_text("Search across project files…")
-                            .desired_width(f32::INFINITY),
-                    );
-                });
-                if let Some(project) = self.project.as_ref() {
-                    let query = self.project_search_query.to_lowercase();
-                    let mut results: Vec<(PathBuf, usize, String)> = Vec::new();
-                    if !query.is_empty() {
-                        for entry in project.files.iter().filter(|entry| {
-                            !entry.is_dir
-                                && (!self.search_current_file
-                                    || project.open.as_ref() == Some(&entry.path))
-                        }) {
-                            if let Ok(contents) = fs::read_to_string(&entry.path) {
-                                for (line_index, line) in contents.lines().enumerate() {
-                                    if line.to_lowercase().contains(&query) {
-                                        results.push((
-                                            entry.path.clone(),
-                                            line_index + 1,
-                                            line.trim().to_string(),
-                                        ));
-                                        if results.len() >= 500 {
-                                            break;
+            egui::Window::new(if self.search_current_file { "Find in file" } else { "Search in project" })
+                .open(&mut open)
+                .default_width(680.0)
+                .default_height(480.0)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Find");
+                        ui.add(egui::TextEdit::singleline(&mut self.project_search_query).hint_text("Search across project files…").desired_width(f32::INFINITY));
+                    });
+                    if let Some(project) = self.project.as_ref() {
+                        let query = self.project_search_query.to_lowercase();
+                        let mut results: Vec<(PathBuf, usize, String)> = Vec::new();
+                        if !query.is_empty() {
+                            for entry in project.files.iter().filter(|entry| !entry.is_dir && (!self.search_current_file || project.open.as_ref() == Some(&entry.path))) {
+                                if let Ok(contents) = fs::read_to_string(&entry.path) {
+                                    for (line_index, line) in contents.lines().enumerate() {
+                                        if line.to_lowercase().contains(&query) {
+                                            results.push((entry.path.clone(), line_index + 1, line.trim().to_string()));
+                                            if results.len() >= 500 { break; }
                                         }
                                     }
                                 }
-                            }
-                            if results.len() >= 500 {
-                                break;
+                                if results.len() >= 500 { break; }
                             }
                         }
+                        ui.label(format!("{} results", results.len()));
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for (path, line, text) in results {
+                                let relative = path.strip_prefix(&project.dir).unwrap_or(&path).display();
+                                if ui.selectable_label(false, format!("{}:{}  {}", relative, line, text)).clicked() {
+                                    action = Some(Action::SelectTab(path));
+                                    self.project_search = false;
+                                }
+                            }
+                        });
                     }
-                    ui.label(format!("{} results", results.len()));
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (path, line, text) in results {
-                            let relative =
-                                path.strip_prefix(&project.dir).unwrap_or(&path).display();
-                            if ui
-                                .selectable_label(false, format!("{}:{}  {}", relative, line, text))
-                                .clicked()
-                            {
-                                action = Some(Action::SelectTab(path));
-                                self.project_search = false;
-                            }
-                        }
-                    });
-                }
-            });
-            if !open {
-                self.project_search = false;
-            }
+                });
+            if !open { self.project_search = false; }
         }
 
         if self.quick_open {
@@ -2684,19 +2650,11 @@ impl eframe::App for IcApp {
                     );
                     if let Some(proj) = self.project.as_ref() {
                         let filter = self.quick_filter.clone();
-                        let mut ranked: Vec<(i32, String, PathBuf)> = proj
-                            .files
-                            .iter()
+                        let mut ranked: Vec<(i32, String, PathBuf)> = proj.files.iter()
                             .filter(|file| !file.is_dir)
                             .filter_map(|file| {
-                                let label = file
-                                    .path
-                                    .strip_prefix(&proj.dir)
-                                    .unwrap_or(&file.path)
-                                    .display()
-                                    .to_string();
-                                fuzzy_score(&label, &filter)
-                                    .map(|score| (score, label, file.path.clone()))
+                                let label = file.path.strip_prefix(&proj.dir).unwrap_or(&file.path).display().to_string();
+                                fuzzy_score(&label, &filter).map(|score| (score, label, file.path.clone()))
                             })
                             .collect();
                         ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -2704,10 +2662,7 @@ impl eframe::App for IcApp {
                             .max_height(360.0)
                             .show(ui, |ui| {
                                 for (_, label, path) in ranked.into_iter().take(100) {
-                                    if ui
-                                        .selectable_label(proj.open.as_ref() == Some(&path), label)
-                                        .clicked()
-                                    {
+                                    if ui.selectable_label(proj.open.as_ref() == Some(&path), label).clicked() {
                                         action = Some(Action::SelectTab(path));
                                         self.quick_open = false;
                                     }
@@ -2729,11 +2684,7 @@ impl eframe::App for IcApp {
                 .default_width(520.0)
                 .anchor(egui::Align2::CENTER_TOP, [0.0, 70.0])
                 .show(ctx, |ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.command_filter)
-                            .hint_text(tr(lang, K::TypeCommand))
-                            .desired_width(f32::INFINITY),
-                    );
+                    ui.add(egui::TextEdit::singleline(&mut self.command_filter).hint_text(tr(lang, K::TypeCommand)).desired_width(f32::INFINITY));
                     let query = self.command_filter.to_lowercase();
                     let commands = [
                         (tr(lang, K::CommandSave), "save"),
@@ -2746,10 +2697,7 @@ impl eframe::App for IcApp {
                         (tr(lang, K::CommandCloseProject), "close project"),
                     ];
                     for (label, command) in commands {
-                        if !query.is_empty()
-                            && !label.to_lowercase().contains(&query)
-                            && !command.contains(&query)
-                        {
+                        if !query.is_empty() && !label.to_lowercase().contains(&query) && !command.contains(&query) {
                             continue;
                         }
                         if ui.selectable_label(false, label).clicked() {
