@@ -68,11 +68,17 @@ impl Lang {
             }
         }
         let locale = locale.to_lowercase();
-        if locale.contains("ru") { Lang::Ru }
-        else if locale.contains("de") { Lang::De }
-        else if locale.contains("fr") { Lang::Fr }
-        else if locale.contains("es") { Lang::Es }
-        else { Lang::En }
+        if locale.contains("ru") {
+            Lang::Ru
+        } else if locale.contains("de") {
+            Lang::De
+        } else if locale.contains("fr") {
+            Lang::Fr
+        } else if locale.contains("es") {
+            Lang::Es
+        } else {
+            Lang::En
+        }
     }
 }
 
@@ -330,7 +336,6 @@ fn tr_base(lang: Lang, k: K) -> &'static str {
         K::TypeCommand => pick(lang, "Введите команду…", "Type a command…"),
     }
 }
-
 
 pub fn tr(lang: Lang, k: K) -> &'static str {
     if lang == Lang::En || lang == Lang::Ru {
