@@ -1,11 +1,12 @@
 mod i18n;
+mod scene_ui;
 
 use eframe::egui::{self, Color32, FontId, Margin, RichText, Rounding, Stroke};
 use i18n::{tr, Lang, K};
 use ic_build::scaffold::{self, Dimension, Generator, Kind, NewProject};
 use ic_build::ProjectSettings;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env, fs,
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
@@ -153,11 +154,17 @@ struct Settings {
     lang: Lang,
     lang_explicit: bool,
     recent: Vec<String>,
+    trusted: Vec<String>,
 }
 
 impl Settings {
     fn path() -> Option<PathBuf> {
-        Some(exe_dir()?.join("settings").join("ic-settings.txt"))
+        Some(
+            exe_dir()?
+                .join(ic_build::confine::DATA_DIR)
+                .join("settings")
+                .join("ic-settings.txt"),
+        )
     }
 
     fn load() -> Self {
@@ -167,6 +174,7 @@ impl Settings {
             lang: Lang::system_default(),
             lang_explicit: false,
             recent: Vec::new(),
+            trusted: Vec::new(),
         };
         let mut saved_lang = None;
         if let Some(path) = Self::path() {
@@ -189,6 +197,7 @@ impl Settings {
                             ("lang", v) => saved_lang = Lang::from_code(v),
                             ("lang_explicit", "true") => s.lang_explicit = true,
                             ("recent", v) if !v.is_empty() => s.recent.push(v.to_string()),
+                            ("trust", v) if !v.is_empty() => s.trusted.push(v.to_string()),
                             _ => {}
                         }
                     }
@@ -218,6 +227,9 @@ impl Settings {
         );
         for r in &self.recent {
             out.push_str(&format!("recent={r}\n"));
+        }
+        for t in &self.trusted {
+            out.push_str(&format!("trust={t}\n"));
         }
         if let Some(path) = Self::path() {
             let _ = fs::write(path, out);
@@ -556,7 +568,7 @@ fn scan_projects(dir: &Path) -> Vec<String> {
     };
     let mut v: Vec<String> = rd
         .filter_map(Result::ok)
-        .filter(|e| e.path().join("main.lua").is_file())
+        .filter(|e| is_project_dir(&e.path()))
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     v.sort_by_key(|n| n.to_lowercase());
@@ -624,6 +636,60 @@ fn generator_label(lang: Lang, g: Generator) -> &'static str {
     }
 }
 
+fn t2(lang: Lang, ru: &'static str, en: &'static str) -> &'static str {
+    if lang == Lang::Ru {
+        ru
+    } else {
+        en
+    }
+}
+
+// Папка проекта: есть main.lua или ic.toml
+fn is_project_dir(dir: &Path) -> bool {
+    dir.join("main.lua").is_file() || dir.join(ProjectSettings::FILE).is_file()
+}
+
+struct LangIcon {
+    badge: String,
+    color: Color32,
+    texture: Option<egui::TextureHandle>,
+}
+
+#[derive(Default)]
+struct LangSet {
+    list: Vec<ic_build::langs::Language>,
+    icons: HashMap<String, LangIcon>,
+}
+
+// PNG-значок языка (до 1024x1024)
+fn load_png_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+    let file = fs::File::open(path).ok()?;
+    let mut decoder = png::Decoder::new(BufReader::new(file));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width as usize, info.height as usize);
+    if w == 0 || h == 0 || w > 1024 || h > 1024 {
+        return None;
+    }
+    let data = &buf[..info.buffer_size()];
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => data.to_vec(),
+        png::ColorType::Rgb => data.chunks(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => {
+            data.chunks(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect()
+        }
+        png::ColorType::Grayscale => data.iter().flat_map(|g| [*g, *g, *g, 255]).collect(),
+        _ => return None,
+    };
+    Some(ctx.load_texture(
+        path.display().to_string(),
+        egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba),
+        egui::TextureOptions::LINEAR,
+    ))
+}
+
 fn valid_name(s: &str) -> bool {
     !s.is_empty() && !s.contains(['/', '\\']) && s != "." && s != ".."
 }
@@ -640,6 +706,8 @@ fn file_color(name: &str) -> Color32 {
         "rs" => Color32::from_rgb(0xDE, 0x6A, 0x35),
         "cpp" | "cc" | "cxx" | "hpp" | "h" => Color32::from_rgb(0x65, 0x9A, 0xD8),
         "c" => Color32::from_rgb(0x8A, 0xA6, 0xC1),
+        "cs" => Color32::from_rgb(0x9B, 0x4F, 0x96),
+        "zig" => Color32::from_rgb(0xF7, 0xA4, 0x1D),
         "toml" => Color32::from_rgb(0xC0, 0x7A, 0x3A),
         "md" | "mdx" => Color32::from_rgb(0x6C, 0xB6, 0xFF),
         "json" => Color32::from_rgb(0xE5, 0xC0, 0x5A),
@@ -660,6 +728,7 @@ fn explorer_rows(
     proj: &Project,
     dark: bool,
     lang: Lang,
+    langs: &LangSet,
     dragging_file: &mut Option<PathBuf>,
     action: &mut Option<Action>,
 ) {
@@ -748,16 +817,40 @@ fn explorer_rows(
                     "html" | "htm" => "5",
                     "css" | "scss" => "#",
                     "wgsl" | "glsl" => "◇",
+                    "cs" => "C#",
+                    "zig" => "Zg",
                     _ => "·",
                 };
-                painter.rect_filled(body, 3.0, file_color(&f.name).gamma_multiply(0.22));
-                painter.text(
-                    body.center(),
-                    egui::Align2::CENTER_CENTER,
-                    glyph,
-                    FontId::proportional(9.0),
-                    file_color(&f.name),
-                );
+                // Свой язык: значок из описания, иначе встроенный
+                if let Some(custom) = langs.icons.get(&ext) {
+                    painter.rect_filled(body, 3.0, custom.color.gamma_multiply(0.22));
+                    if let Some(tex) = &custom.texture {
+                        let icon = egui::Rect::from_center_size(body.center(), egui::vec2(16.0, 16.0));
+                        painter.image(
+                            tex.id(),
+                            icon,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                    } else {
+                        painter.text(
+                            body.center(),
+                            egui::Align2::CENTER_CENTER,
+                            &custom.badge,
+                            FontId::proportional(9.0),
+                            custom.color,
+                        );
+                    }
+                } else {
+                    painter.rect_filled(body, 3.0, file_color(&f.name).gamma_multiply(0.22));
+                    painter.text(
+                        body.center(),
+                        egui::Align2::CENTER_CENTER,
+                        glyph,
+                        FontId::proportional(9.0),
+                        file_color(&f.name),
+                    );
+                }
             }
             painter.text(
                 egui::pos2(x + 38.0, cy),
@@ -914,10 +1007,7 @@ impl Default for SceneEditor {
 impl SceneEditor {
     fn open_project(&mut self, project_dir: &Path) {
         let dir = project_dir.join("scenes");
-        if !dir.exists() {
-            let _ = fs::create_dir(&dir);
-        }
-        if !dir.is_dir() || !project_path_is_safe(project_dir, &dir) {
+        if dir.exists() && (!dir.is_dir() || !project_path_is_safe(project_dir, &dir)) {
             self.open = false;
             self.path = None;
             self.status = Some("Scene folder is outside the project".into());
@@ -970,7 +1060,6 @@ impl SceneEditor {
             }
         }
         self.path = Some(path);
-        self.open = true;
     }
 
     fn save(&mut self) -> Result<(), String> {
@@ -980,6 +1069,11 @@ impl SceneEditor {
         if let Some(project) = path.parent().and_then(Path::parent) {
             if !project_path_is_safe(project, path) {
                 return Err("Scene path is outside the project".into());
+            }
+        }
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent).map_err(|e| format!("scene save error: {e}"))?;
             }
         }
         let mut out = String::new();
@@ -1006,18 +1100,8 @@ impl SceneEditor {
 
     fn add_node_kind(&mut self, kind: &str) {
         let n = self.nodes.len();
-        let (width, height, color) = match kind {
-            "Camera2D" => (72.0, 52.0, [88, 150, 190]),
-            "Sprite2D" => (88.0, 88.0, [92, 164, 116]),
-            "Area2D" => (112.0, 80.0, [154, 118, 194]),
-            "StaticBody2D" => (112.0, 72.0, [180, 130, 84]),
-            "CharacterBody2D" => (120.0, 84.0, [190, 112, 86]),
-            "CollisionShape2D" => (76.0, 76.0, [190, 170, 82]),
-            "AudioStreamPlayer2D" => (104.0, 54.0, [164, 118, 178]),
-            "Label" => (100.0, 38.0, [88, 132, 190]),
-            "CanvasLayer" => (120.0, 42.0, [100, 150, 160]),
-            _ => (96.0, 64.0, [72, 132, 196]),
-        };
+        // Размер и цвет по виду узла
+        let (width, height, color) = scene_ui::node_defaults(kind);
         let base = kind.to_string();
         let count = self.nodes.iter().filter(|node| node.kind == kind).count();
         self.nodes.push(SceneNode {
@@ -1108,6 +1192,11 @@ enum Action {
     PromptOk,
     PromptCancel,
     ToggleDir(PathBuf),
+    CloseScene,
+    SaveScene,
+    RunLang(String),
+    TrustLang(String),
+    CancelTrust,
 }
 
 struct IcApp {
@@ -1134,6 +1223,9 @@ struct IcApp {
     search_current_file: bool,
     scene_editor: SceneEditor,
     window_title: String,
+    ctx: egui::Context,
+    langs: LangSet,
+    trust_prompt: Option<String>,
 }
 
 impl IcApp {
@@ -1146,7 +1238,7 @@ impl IcApp {
             .join("projects")
             .to_string_lossy()
             .into_owned();
-        Self {
+        let mut app = Self {
             settings,
             name: "my_game".into(),
             location,
@@ -1170,7 +1262,12 @@ impl IcApp {
             search_current_file: false,
             scene_editor: SceneEditor::default(),
             window_title: "IC".into(),
-        }
+            ctx: cc.egui_ctx.clone(),
+            langs: LangSet::default(),
+            trust_prompt: None,
+        };
+        app.reload_langs();
+        app
     }
 
     fn begin_create(&mut self) {
@@ -1329,7 +1426,7 @@ impl IcApp {
                 return;
             }
         };
-        if !dir.join("main.lua").is_file() || !project_path_is_safe(&dir, &dir.join("main.lua")) {
+        if !is_project_dir(&dir) {
             self.start_error = Some(tr(lang, K::ErrNotProject).to_string());
             return;
         }
@@ -1351,9 +1448,13 @@ impl IcApp {
             collapsed: HashSet::new(),
             selected: dir.clone(),
         };
-        load_file(&mut proj, dir.join("main.lua"), lang);
+        if dir.join("main.lua").is_file() {
+            load_file(&mut proj, dir.join("main.lua"), lang);
+        }
         self.project = Some(proj);
         self.scene_editor.open_project(&dir);
+        self.scene_editor.open = false;
+        self.reload_langs();
         self.start_error = None;
         self.settings.push_recent(&dir);
         self.settings.save();
@@ -1463,6 +1564,152 @@ impl IcApp {
         }
     }
 
+    fn save_scene(&mut self, force: bool) {
+        let Some(path) = self.scene_editor.path.clone() else {
+            return;
+        };
+        if !force && !self.scene_editor.dirty {
+            return;
+        }
+        let existed = path.is_file();
+        match self.scene_editor.save() {
+            Ok(()) => {
+                self.scene_editor.status = Some(tr(self.settings.lang, K::SceneSaved).to_string());
+            }
+            Err(e) => self.scene_editor.status = Some(e),
+        }
+        if !existed {
+            if let Some(proj) = self.project.as_mut() {
+                proj.files.clear();
+                scan(&proj.dir, 0, &mut proj.files);
+            }
+        }
+    }
+
+    fn reload_langs(&mut self) {
+        let mut dirs = Vec::new();
+        if let Some(d) = ic_build::confine::data_dir() {
+            dirs.push(d.join("languages"));
+        }
+        if let Some(p) = &self.project {
+            dirs.push(p.dir.join("languages"));
+        }
+        let mut list = Vec::new();
+        for d in dirs {
+            let (found, errors) = ic_build::langs::load_dir(&d);
+            self.log.extend(errors);
+            list.extend(found);
+        }
+        let mut icons = HashMap::new();
+        for l in &list {
+            let texture = l.icon.as_ref().and_then(|p| load_png_texture(&self.ctx, p));
+            for ext in &l.extensions {
+                icons.insert(
+                    ext.clone(),
+                    LangIcon {
+                        badge: l.badge.clone(),
+                        color: Color32::from_rgb(l.color[0], l.color[1], l.color[2]),
+                        texture: texture.clone(),
+                    },
+                );
+            }
+        }
+        self.langs = LangSet { list, icons };
+    }
+
+    fn run_lang(&mut self, ctx: &egui::Context, l: ic_build::langs::Language) {
+        let Some(proj) = self.project.as_ref() else {
+            return;
+        };
+        let Some(file) = proj.open.clone() else {
+            return;
+        };
+        if !project_path_is_safe(&proj.dir, &file) {
+            self.log.push("run refused: file is outside the project".into());
+            return;
+        }
+        let out_dir = proj.dir.join("build");
+        if let Err(e) = fs::create_dir_all(&out_dir) {
+            self.log.push(format!("{}: {e}", out_dir.display()));
+            return;
+        }
+        let mut out = out_dir.join(file.file_stem().unwrap_or_default());
+        if cfg!(windows) {
+            out.set_extension("exe");
+        }
+        let compiler = l
+            .compiler
+            .as_ref()
+            .map(|c| c.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (file_s, out_s, dir_s) = (
+            file.to_string_lossy().into_owned(),
+            out.to_string_lossy().into_owned(),
+            proj.dir.to_string_lossy().into_owned(),
+        );
+        let vars = [
+            ("compiler", compiler.as_str()),
+            ("file", file_s.as_str()),
+            ("out", out_s.as_str()),
+            ("dir", dir_s.as_str()),
+        ];
+        let steps = [
+            ic_build::langs::expand(&l.build, &vars),
+            ic_build::langs::expand(&l.run, &vars),
+        ];
+        if steps[0].is_empty() {
+            self.log.push(format!("{}: пустая команда build", l.name));
+            return;
+        }
+        let cwd = proj.dir.clone();
+        let data = ic_build::confine::data_dir();
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        thread::spawn(move || {
+            for step in steps {
+                if step.is_empty() {
+                    continue;
+                }
+                let _ = tx.send(format!("> {}", step.join(" ")));
+                let mut cmd = Command::new(&step[0]);
+                cmd.args(&step[1..])
+                    .current_dir(&cwd)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                if let Some(d) = &data {
+                    ic_build::confine::child_env(&mut cmd, d);
+                }
+                hide_console(&mut cmd);
+                match cmd.spawn() {
+                    Err(e) => {
+                        let _ = tx.send(format!("error: {e}"));
+                        break;
+                    }
+                    Ok(mut child) => {
+                        let pumps = [
+                            pump(child.stdout.take(), tx.clone(), ctx.clone()),
+                            pump(child.stderr.take(), tx.clone(), ctx.clone()),
+                        ];
+                        for h in pumps.into_iter().flatten() {
+                            let _ = h.join();
+                        }
+                        match child.wait() {
+                            Ok(status) => {
+                                let _ = tx.send(format!("[{status}]"));
+                                if !status.success() {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+            }
+            ctx.request_repaint();
+        });
+    }
+
     fn project_dir(&self) -> Option<String> {
         self.project
             .as_ref()
@@ -1516,7 +1763,15 @@ impl IcApp {
                 self.open_project(dir);
             }
             Action::OpenRecent(p) => self.open_project(PathBuf::from(p)),
-            Action::Save => self.save(),
+            Action::Save => {
+                self.save();
+                self.save_scene(false);
+            }
+            Action::SaveScene => self.save_scene(true),
+            Action::CloseScene => {
+                self.save_scene(false);
+                self.scene_editor.open = false;
+            }
             Action::Run => {
                 self.save();
                 if let Some(dir) = self.project_dir() {
@@ -1538,18 +1793,48 @@ impl IcApp {
                 self.scene_editor.open = false;
                 self.start_error = None;
             }
-            Action::OpenFile(p) | Action::SelectTab(p) => self.open_file(p),
+            Action::OpenFile(p) | Action::SelectTab(p) => {
+                self.scene_editor.open = false;
+                self.open_file(p);
+            }
             Action::CloseTab(p) => self.close_tab(p),
             Action::MovePath(source, destination) => self.move_project_file(source, destination),
             Action::OpenScene => {
                 if let Some(dir) = self.project.as_ref().map(|p| p.dir.clone()) {
-                    self.scene_editor.open_project(&dir);
-                    if let Some(proj) = self.project.as_mut() {
-                        proj.files.clear();
-                        scan(&proj.dir, 0, &mut proj.files);
+                    if self.scene_editor.path.is_none() {
+                        self.scene_editor.open_project(&dir);
+                    }
+                    self.scene_editor.open = self.scene_editor.path.is_some();
+                }
+            }
+            Action::RunLang(id) => {
+                self.save();
+                let found = self.langs.list.iter().find(|l| l.id == id).cloned();
+                if let Some(l) = found {
+                    let compiler = l
+                        .compiler
+                        .as_ref()
+                        .map(|c| c.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    if self.settings.trusted.contains(&compiler) {
+                        self.run_lang(ctx, l);
+                    } else {
+                        self.trust_prompt = Some(id);
                     }
                 }
             }
+            Action::TrustLang(id) => {
+                self.trust_prompt = None;
+                let found = self.langs.list.iter().find(|l| l.id == id).cloned();
+                if let Some(l) = found {
+                    if let Some(c) = &l.compiler {
+                        self.settings.trusted.push(c.to_string_lossy().into_owned());
+                        self.settings.save();
+                    }
+                    self.run_lang(ctx, l);
+                }
+            }
+            Action::CancelTrust => self.trust_prompt = None,
             Action::ClearLog => self.log.clear(),
             Action::Check => {
                 self.save();
@@ -1693,331 +1978,6 @@ impl IcApp {
             }
         }
     }
-
-    fn show_scene_editor(&mut self, ctx: &egui::Context, lang: Lang, dark: bool) {
-        if !self.scene_editor.open {
-            return;
-        }
-        let scene_title = self
-            .project
-            .as_ref()
-            .map(|project| format!("IC - {} — Scene", project.name))
-            .unwrap_or_else(|| "IC - Scene".to_string());
-        let scene = &mut self.scene_editor;
-        let scene_file_before = scene.path.as_ref().is_some_and(|path| path.is_file());
-        let viewport_id = egui::ViewportId::from_hash_of("ic_scene_editor");
-        let builder = egui::ViewportBuilder::default()
-            .with_title(scene_title)
-            .with_inner_size([1240.0, 780.0])
-            .with_min_inner_size([900.0, 580.0]);
-
-        ctx.show_viewport_immediate(viewport_id, builder, |scene_ctx, _class| {
-            if scene_ctx.input(|i| i.viewport().close_requested()) {
-                if scene.dirty {
-                    let _ = scene.save();
-                }
-                scene.open = false;
-                return;
-            }
-            if scene_ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
-                if let Err(e) = scene.save() {
-                    scene.status = Some(e);
-                } else {
-                    scene.status = Some(tr(lang, K::SceneSaved).to_string());
-                }
-            }
-            let panel = palette(dark).panel;
-            let canvas = palette(dark).editor;
-            egui::TopBottomPanel::top("scene_toolbar")
-                .frame(
-                    egui::Frame::none()
-                        .fill(panel)
-                        .inner_margin(Margin::symmetric(12.0, 8.0)),
-                )
-                .show(scene_ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("IC  /  SCENE").strong());
-                        ui.separator();
-                        ui.menu_button(tr(lang, K::AddSceneNode), |ui| {
-                            for kind in [
-                                "Node2D",
-                                "Sprite2D",
-                                "Camera2D",
-                                "Area2D",
-                                "StaticBody2D",
-                                "CharacterBody2D",
-                                "CollisionShape2D",
-                                "AudioStreamPlayer2D",
-                                "Label",
-                                "CanvasLayer",
-                            ] {
-                                if ui.button(kind).clicked() {
-                                    scene.add_node_kind(kind);
-                                    ui.close_menu();
-                                }
-                            }
-                        });
-                        if button(ui, tr(lang, K::Save))
-                            .on_hover_text("Ctrl+S")
-                            .clicked()
-                        {
-                            if let Err(e) = scene.save() {
-                                scene.status = Some(e);
-                            } else {
-                                scene.status = Some(tr(lang, K::SceneSaved).to_string());
-                            }
-                        }
-                        if scene.dirty {
-                            ui.label(
-                                RichText::new("● unsaved")
-                                    .color(Color32::from_rgb(0xE5, 0xA0, 0x3B)),
-                            );
-                        }
-                        if let Some(status) = &scene.status {
-                            ui.label(RichText::new(status).small().weak());
-                        }
-                    });
-                });
-
-            egui::SidePanel::left("scene_hierarchy")
-                .resizable(true)
-                .default_width(190.0)
-                .width_range(150.0..=320.0)
-                .frame(
-                    egui::Frame::none()
-                        .fill(panel)
-                        .inner_margin(Margin::same(10.0)),
-                )
-                .show(scene_ctx, |ui| {
-                    ui.label(RichText::new(tr(lang, K::Hierarchy)).small().strong());
-                    ui.separator();
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for index in 0..scene.nodes.len() {
-                            let label =
-                                format!("{}  {}", scene.nodes[index].kind, scene.nodes[index].name);
-                            if ui
-                                .selectable_label(scene.selected == Some(index), label)
-                                .clicked()
-                            {
-                                scene.selected = Some(index);
-                            }
-                        }
-                    });
-                    if scene.nodes.is_empty() {
-                        ui.label(RichText::new(tr(lang, K::SceneEmpty)).small().weak());
-                    }
-                });
-
-            egui::SidePanel::right("scene_inspector")
-                .resizable(true)
-                .default_width(230.0)
-                .width_range(180.0..=400.0)
-                .frame(
-                    egui::Frame::none()
-                        .fill(panel)
-                        .inner_margin(Margin::same(10.0)),
-                )
-                .show(scene_ctx, |ui| {
-                    ui.label(RichText::new(tr(lang, K::Inspector)).small().strong());
-                    ui.separator();
-                    if let Some(index) = scene.selected.filter(|i| *i < scene.nodes.len()) {
-                        let node = &mut scene.nodes[index];
-                        let mut kind = node.kind.clone();
-                        ui.label("Node type");
-                        egui::ComboBox::from_id_source("scene_node_kind")
-                            .selected_text(&node.kind)
-                            .show_ui(ui, |ui| {
-                                for option in [
-                                    "Node2D",
-                                    "Sprite2D",
-                                    "Camera2D",
-                                    "Area2D",
-                                    "StaticBody2D",
-                                    "CharacterBody2D",
-                                    "CollisionShape2D",
-                                    "AudioStreamPlayer2D",
-                                    "Label",
-                                    "CanvasLayer",
-                                ] {
-                                    ui.selectable_value(&mut kind, option.to_string(), option);
-                                }
-                            });
-                        if kind != node.kind {
-                            node.kind = kind;
-                            scene.dirty = true;
-                        }
-                        ui.label(tr(lang, K::NodeName));
-                        if ui.text_edit_singleline(&mut node.name).changed() {
-                            scene.dirty = true;
-                        }
-                        ui.add_space(8.0);
-                        ui.label(tr(lang, K::Position));
-                        ui.horizontal(|ui| {
-                            ui.label("X");
-                            if ui
-                                .add(egui::DragValue::new(&mut node.x).speed(1.0))
-                                .changed()
-                            {
-                                scene.dirty = true;
-                            }
-                            ui.label("Y");
-                            if ui
-                                .add(egui::DragValue::new(&mut node.y).speed(1.0))
-                                .changed()
-                            {
-                                scene.dirty = true;
-                            }
-                        });
-                        ui.add_space(8.0);
-                        ui.label(tr(lang, K::Size));
-                        ui.horizontal(|ui| {
-                            ui.label("W");
-                            if ui
-                                .add(
-                                    egui::DragValue::new(&mut node.width)
-                                        .speed(1.0)
-                                        .range(8.0..=2048.0),
-                                )
-                                .changed()
-                            {
-                                scene.dirty = true;
-                            }
-                            ui.label("H");
-                            if ui
-                                .add(
-                                    egui::DragValue::new(&mut node.height)
-                                        .speed(1.0)
-                                        .range(8.0..=2048.0),
-                                )
-                                .changed()
-                            {
-                                scene.dirty = true;
-                            }
-                        });
-                        ui.add_space(8.0);
-                        ui.label(tr(lang, K::Color));
-                        if ui.color_edit_button_srgb(&mut node.color).changed() {
-                            scene.dirty = true;
-                        }
-                        ui.add_space(12.0);
-                        if ui.button(tr(lang, K::DeleteSceneNode)).clicked() {
-                            scene.nodes.remove(index);
-                            scene.selected = None;
-                            scene.dirty = true;
-                        }
-                    } else {
-                        ui.label(RichText::new(tr(lang, K::SceneSelectNode)).small().weak());
-                    }
-                });
-
-            egui::CentralPanel::default()
-                .frame(
-                    egui::Frame::none()
-                        .fill(canvas)
-                        .inner_margin(Margin::same(10.0)),
-                )
-                .show(scene_ctx, |ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-                    let painter = ui.painter_at(rect);
-                    painter.rect_filled(rect, 4.0, canvas);
-                    let grid_color = if dark {
-                        Color32::from_gray(55)
-                    } else {
-                        Color32::from_gray(220)
-                    };
-                    let mut gx = rect.left() + 24.0;
-                    while gx < rect.right() {
-                        painter.line_segment(
-                            [egui::pos2(gx, rect.top()), egui::pos2(gx, rect.bottom())],
-                            Stroke::new(1.0_f32, grid_color),
-                        );
-                        gx += 32.0;
-                    }
-                    let mut gy = rect.top() + 24.0;
-                    while gy < rect.bottom() {
-                        painter.line_segment(
-                            [egui::pos2(rect.left(), gy), egui::pos2(rect.right(), gy)],
-                            Stroke::new(1.0_f32, grid_color),
-                        );
-                        gy += 32.0;
-                    }
-                    let origin = rect.left_top() + egui::vec2(24.0, 24.0);
-                    for index in 0..scene.nodes.len() {
-                        let current = scene.nodes[index].clone();
-                        let node_rect = egui::Rect::from_min_size(
-                            origin + egui::vec2(current.x, current.y),
-                            egui::vec2(current.width.max(8.0), current.height.max(8.0)),
-                        );
-                        let response = ui.interact(
-                            node_rect,
-                            egui::Id::new(("scene_node", index)),
-                            egui::Sense::click_and_drag(),
-                        );
-                        if response.clicked() {
-                            scene.selected = Some(index);
-                        }
-                        if response.drag_started() {
-                            scene.selected = Some(index);
-                            scene.drag_origin = Some((index, current.x, current.y));
-                        }
-                        if response.dragged() {
-                            if let Some((drag_index, start_x, start_y)) = scene.drag_origin {
-                                if drag_index == index {
-                                    let delta = response.drag_delta();
-                                    scene.nodes[index].x = start_x + delta.x;
-                                    scene.nodes[index].y = start_y + delta.y;
-                                    scene.dirty = true;
-                                }
-                            }
-                        }
-                        let node = &scene.nodes[index];
-                        let fill = Color32::from_rgb(node.color[0], node.color[1], node.color[2]);
-                        painter.rect_filled(node_rect, 3.0, fill.gamma_multiply(0.82));
-                        painter.rect_stroke(
-                            node_rect,
-                            Rounding::same(3.0),
-                            Stroke::new(
-                                if scene.selected == Some(index) {
-                                    2.0
-                                } else {
-                                    1.0_f32
-                                },
-                                if scene.selected == Some(index) {
-                                    Color32::WHITE
-                                } else {
-                                    fill
-                                },
-                            ),
-                        );
-                        painter.text(
-                            node_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            &node.name,
-                            FontId::proportional(14.0),
-                            Color32::WHITE,
-                        );
-                    }
-                    if scene_ctx.input(|i| i.pointer.any_released()) {
-                        scene.drag_origin = None;
-                    }
-                    painter.text(
-                        rect.left_bottom() + egui::vec2(8.0, -8.0),
-                        egui::Align2::LEFT_BOTTOM,
-                        tr(lang, K::CanvasHint),
-                        FontId::proportional(11.0),
-                        scene_ctx.style().visuals.weak_text_color(),
-                    );
-                });
-        });
-        let scene_file_after = scene.path.as_ref().is_some_and(|path| path.is_file());
-        if !scene_file_before && scene_file_after {
-            if let Some(proj) = self.project.as_mut() {
-                proj.files.clear();
-                scan(&proj.dir, 0, &mut proj.files);
-            }
-        }
-    }
 }
 
 impl eframe::App for IcApp {
@@ -2120,6 +2080,16 @@ impl eframe::App for IcApp {
             }
         );
 
+        // Кнопка запуска для открытого файла на своём языке
+        let run_lang: Option<(String, String)> = self
+            .project
+            .as_ref()
+            .and_then(|proj| proj.open.as_ref())
+            .and_then(|file| file.file_name())
+            .and_then(|name| self.langs.list.iter().find(|l| l.matches(&name.to_string_lossy())))
+            .filter(|l| l.compiler.is_some() && !l.build.is_empty())
+            .map(|l| (l.id.clone(), l.name.clone()));
+
         egui::TopBottomPanel::top("top")
             .frame(
                 egui::Frame::none()
@@ -2152,6 +2122,11 @@ impl eframe::App for IcApp {
                             .clicked()
                         {
                             action = Some(Action::Build);
+                        }
+                        if let Some((id, name)) = &run_lang {
+                            if primary_button(ui, &format!("▶ {name}")).clicked() {
+                                action = Some(Action::RunLang(id.clone()));
+                            }
                         }
                         if button(ui, tr(lang, K::SceneEditor)).clicked() {
                             action = Some(Action::OpenScene);
@@ -2312,8 +2287,8 @@ impl eframe::App for IcApp {
 
             egui::SidePanel::left("files")
                 .resizable(true)
-                .default_width(190.0)
-                .width_range(150.0..=300.0)
+                .default_width(240.0)
+                .width_range(150.0..=480.0)
                 .frame(
                     egui::Frame::none()
                         .fill(p.panel)
@@ -2323,6 +2298,17 @@ impl eframe::App for IcApp {
                     let Some(proj) = self.project.as_ref() else {
                         return;
                     };
+                    // Дерево сцены над файлами, граница двигается мышью
+                    if self.scene_editor.open {
+                        egui::TopBottomPanel::top("scene_dock")
+                            .resizable(true)
+                            .default_height(230.0)
+                            .height_range(90.0..=700.0)
+                            .frame(egui::Frame::none().inner_margin(Margin::symmetric(10.0, 4.0)))
+                            .show_inside(ui, |ui| {
+                                scene_ui::scene_tree_ui(ui, &mut self.scene_editor, lang);
+                            });
+                    }
                     let mut base = proj.selected.clone();
                     if !base.is_dir() {
                         base = base
@@ -2371,6 +2357,7 @@ impl eframe::App for IcApp {
                                 proj,
                                 dark,
                                 lang,
+                                &self.langs,
                                 &mut self.dragging_file,
                                 &mut action,
                             );
@@ -2379,6 +2366,21 @@ impl eframe::App for IcApp {
                             }
                         });
                 });
+            // Свойства узла справа, как в Godot
+            if self.scene_editor.open {
+                egui::SidePanel::right("scene_inspector")
+                    .resizable(true)
+                    .default_width(230.0)
+                    .width_range(180.0..=420.0)
+                    .frame(
+                        egui::Frame::none()
+                            .fill(p.panel)
+                            .inner_margin(Margin::same(10.0)),
+                    )
+                    .show(ctx, |ui| {
+                        scene_ui::scene_inspector_ui(ui, &mut self.scene_editor, lang);
+                    });
+            }
             egui::CentralPanel::default()
                 .frame(
                     egui::Frame::none()
@@ -2389,6 +2391,28 @@ impl eframe::App for IcApp {
                     let Some(proj) = self.project.as_mut() else {
                         return;
                     };
+                    // Переключатель: скрипт или сцена
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(!self.scene_editor.open, t2(lang, "Скрипт", "Script"))
+                            .clicked()
+                        {
+                            action = Some(Action::CloseScene);
+                        }
+                        if ui
+                            .selectable_label(self.scene_editor.open, tr(lang, K::SceneEditor))
+                            .clicked()
+                        {
+                            action = Some(Action::OpenScene);
+                        }
+                    });
+                    if self.scene_editor.open {
+                        if scene_ui::scene_toolbar_ui(ui, &mut self.scene_editor, lang) {
+                            action = Some(Action::SaveScene);
+                        }
+                        scene_ui::scene_canvas_ui(ui, &mut self.scene_editor, lang, dark, p.editor);
+                        return;
+                    }
                     if proj.dirty {
                         ui.label(
                             RichText::new(format!("● {}", tr(lang, K::Unsaved)))
@@ -2478,11 +2502,7 @@ impl eframe::App for IcApp {
                 let n = self.name.trim();
                 !n.is_empty() && !n.contains(['/', '\\'])
             };
-            let exists = name_ok
-                && resolve_dir(&self.location)
-                    .join(self.name.trim())
-                    .join("main.lua")
-                    .is_file();
+            let exists = name_ok && is_project_dir(&resolve_dir(&self.location).join(self.name.trim()));
             if self.location != self.found_for {
                 self.found = scan_projects(&resolve_dir(&self.location));
                 self.found_for = self.location.clone();
@@ -2986,10 +3006,46 @@ impl eframe::App for IcApp {
                     });
                 });
         }
+        if let Some(id) = self.trust_prompt.clone() {
+            if let Some(l) = self.langs.list.iter().find(|l| l.id == id) {
+                let compiler = l
+                    .compiler
+                    .as_ref()
+                    .map(|c| c.display().to_string())
+                    .unwrap_or_default();
+                let command = l.build.join(" ");
+                egui::Window::new(t2(lang, "Запустить компилятор?", "Run the compiler?"))
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                    .show(ctx, |ui| {
+                        ui.label(t2(
+                            lang,
+                            "IC запустит этот компилятор:",
+                            "IC will run this compiler:",
+                        ));
+                        ui.monospace(&compiler);
+                        ui.label(t2(lang, "Команда сборки:", "Build command:"));
+                        ui.monospace(&command);
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            if primary_button(ui, t2(lang, "Разрешить и запустить", "Allow and run"))
+                                .clicked()
+                            {
+                                action = Some(Action::TrustLang(id.clone()));
+                            }
+                            if button(ui, tr(lang, K::Cancel)).clicked() {
+                                action = Some(Action::CancelTrust);
+                            }
+                        });
+                    });
+            } else {
+                self.trust_prompt = None;
+            }
+        }
         if let Some(a) = action {
             self.handle(ctx, a);
         }
-        self.show_scene_editor(ctx, lang, dark);
     }
 }
 

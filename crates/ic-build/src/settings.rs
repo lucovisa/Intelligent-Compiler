@@ -110,8 +110,7 @@ impl ProjectSettings {
     pub fn to_toml(&self) -> String {
         let [r, g, b] = self.background;
         format!(
-            "# Настройки проекта IC. Меняй здесь или в окне IC → «Настройки».\n\
-             title = \"{}\"\nwidth = {}\nheight = {}\ntick_rate = {}\nbackground = \"#{r:02x}{g:02x}{b:02x}\"\n\
+            "title = \"{}\"\nwidth = {}\nheight = {}\ntick_rate = {}\nbackground = \"#{r:02x}{g:02x}{b:02x}\"\n\
              target = \"{}\"\nkind = \"{}\"\ndimension = \"{}\"\nlabel = \"{}\"\n",
             self.title.replace('"', "'"),
             self.width,

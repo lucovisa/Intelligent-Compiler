@@ -8,12 +8,19 @@ use std::{
     sync::Mutex,
 };
 
+// Единая папка данных приложения рядом с исполняемым файлом
+pub const DATA_DIR: &str = "IC-data";
+
 // Пути, которые пользователь выбрал сам (проект, папка вывода)
 static ROOTS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 // Папка X — рядом с исполняемым файлом
 pub fn base_dir() -> Option<PathBuf> {
     env::current_exe().ok()?.parent().map(Path::to_path_buf)
+}
+
+pub fn data_dir() -> Option<PathBuf> {
+    base_dir().map(|b| b.join(DATA_DIR))
 }
 
 // Абсолютный путь без `.` и `..` (без обращения к диску)
@@ -93,12 +100,15 @@ pub fn check(path: &Path) -> Result<(), String> {
 }
 
 // Кэши, настройки, временные файлы и кэш Zig — внутрь папки X
-pub fn confine_env(base: &Path) -> Result<(), String> {
+pub fn confine_env(exe_dir: &Path) -> Result<(), String> {
+    // Всё в одной папке приложения
+    let base = exe_dir.join(DATA_DIR);
     let cache = base.join("cache");
     let config = base.join("settings");
     let data = base.join("data");
     let tmp = base.join("tmp");
-    for d in [&cache, &config, &data, &tmp] {
+    let langs = base.join("languages");
+    for d in [&cache, &config, &data, &tmp, &langs] {
         fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
 
@@ -110,10 +120,7 @@ pub fn confine_env(base: &Path) -> Result<(), String> {
     set("MESA_SHADER_CACHE_DIR", cache.as_os_str());
     set("__GL_SHADER_DISK_CACHE_PATH", cache.as_os_str());
     set("MESA_SHADER_CACHE_MAX_SIZE", std::ffi::OsStr::new("256M"));
-    set(
-        "__GL_SHADER_DISK_CACHE_SIZE",
-        std::ffi::OsStr::new("268435456"),
-    );
+    set("__GL_SHADER_DISK_CACHE_SIZE", std::ffi::OsStr::new("268435456"));
     // Временные файлы
     for k in ["TMPDIR", "TEMP", "TMP"] {
         set(k, tmp.as_os_str());
@@ -148,7 +155,7 @@ mod tests {
     #[test]
     fn base_dir_is_allowed() {
         let base = base_dir().unwrap();
-        assert!(is_allowed(&base.join("cache").join("x.bin")));
+        assert!(is_allowed(&base.join(DATA_DIR).join("cache").join("x.bin")));
     }
 
     #[test]
