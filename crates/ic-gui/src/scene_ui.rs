@@ -123,10 +123,17 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
                 let color = node_color(&kind);
                 let resp = ui
                     .horizontal(|ui| {
-                        let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-                        ui.painter()
-                            .rect_filled(r, 3.0, Color32::from_rgb(color[0], color[1], color[2]));
-                        ui.selectable_label(scene.selected == Some(index), format!("{name}  ·  {kind}"))
+                        let (r, _) =
+                            ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                        ui.painter().rect_filled(
+                            r,
+                            3.0,
+                            Color32::from_rgb(color[0], color[1], color[2]),
+                        );
+                        ui.selectable_label(
+                            scene.selected == Some(index),
+                            format!("{name}  ·  {kind}"),
+                        )
                     })
                     .inner;
                 if resp.clicked() {
@@ -154,7 +161,10 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
 pub fn scene_toolbar_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) -> bool {
     let mut save = false;
     ui.horizontal(|ui| {
-        if button(ui, tr(lang, K::Save)).on_hover_text("Ctrl+S").clicked() {
+        if button(ui, tr(lang, K::Save))
+            .on_hover_text("Ctrl+S")
+            .clicked()
+        {
             save = true;
         }
         if scene.dirty {
@@ -202,20 +212,32 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
         ui.label(tr(lang, K::Position));
         ui.horizontal(|ui| {
             ui.label("X");
-            dirty |= ui.add(egui::DragValue::new(&mut node.x).speed(1.0)).changed();
+            dirty |= ui
+                .add(egui::DragValue::new(&mut node.x).speed(1.0))
+                .changed();
             ui.label("Y");
-            dirty |= ui.add(egui::DragValue::new(&mut node.y).speed(1.0)).changed();
+            dirty |= ui
+                .add(egui::DragValue::new(&mut node.y).speed(1.0))
+                .changed();
         });
         ui.add_space(8.0);
         ui.label(tr(lang, K::Size));
         ui.horizontal(|ui| {
             ui.label("W");
             dirty |= ui
-                .add(egui::DragValue::new(&mut node.width).speed(1.0).range(8.0..=2048.0))
+                .add(
+                    egui::DragValue::new(&mut node.width)
+                        .speed(1.0)
+                        .range(8.0..=2048.0),
+                )
                 .changed();
             ui.label("H");
             dirty |= ui
-                .add(egui::DragValue::new(&mut node.height).speed(1.0).range(8.0..=2048.0))
+                .add(
+                    egui::DragValue::new(&mut node.height)
+                        .speed(1.0)
+                        .range(8.0..=2048.0),
+                )
                 .changed();
         });
         ui.add_space(8.0);

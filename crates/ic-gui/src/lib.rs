@@ -676,10 +676,14 @@ fn load_png_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHan
     let data = &buf[..info.buffer_size()];
     let rgba: Vec<u8> = match info.color_type {
         png::ColorType::Rgba => data.to_vec(),
-        png::ColorType::Rgb => data.chunks(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
-        png::ColorType::GrayscaleAlpha => {
-            data.chunks(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect()
-        }
+        png::ColorType::Rgb => data
+            .chunks(3)
+            .flat_map(|c| [c[0], c[1], c[2], 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => data
+            .chunks(2)
+            .flat_map(|c| [c[0], c[0], c[0], c[1]])
+            .collect(),
         png::ColorType::Grayscale => data.iter().flat_map(|g| [*g, *g, *g, 255]).collect(),
         _ => return None,
     };
@@ -825,7 +829,8 @@ fn explorer_rows(
                 if let Some(custom) = langs.icons.get(&ext) {
                     painter.rect_filled(body, 3.0, custom.color.gamma_multiply(0.22));
                     if let Some(tex) = &custom.texture {
-                        let icon = egui::Rect::from_center_size(body.center(), egui::vec2(16.0, 16.0));
+                        let icon =
+                            egui::Rect::from_center_size(body.center(), egui::vec2(16.0, 16.0));
                         painter.image(
                             tex.id(),
                             icon,
@@ -1625,7 +1630,8 @@ impl IcApp {
             return;
         };
         if !project_path_is_safe(&proj.dir, &file) {
-            self.log.push("run refused: file is outside the project".into());
+            self.log
+                .push("run refused: file is outside the project".into());
             return;
         }
         let out_dir = proj.dir.join("build");
@@ -2086,7 +2092,12 @@ impl eframe::App for IcApp {
             .as_ref()
             .and_then(|proj| proj.open.as_ref())
             .and_then(|file| file.file_name())
-            .and_then(|name| self.langs.list.iter().find(|l| l.matches(&name.to_string_lossy())))
+            .and_then(|name| {
+                self.langs
+                    .list
+                    .iter()
+                    .find(|l| l.matches(&name.to_string_lossy()))
+            })
             .filter(|l| l.compiler.is_some() && !l.build.is_empty())
             .map(|l| (l.id.clone(), l.name.clone()));
 
@@ -2502,7 +2513,8 @@ impl eframe::App for IcApp {
                 let n = self.name.trim();
                 !n.is_empty() && !n.contains(['/', '\\'])
             };
-            let exists = name_ok && is_project_dir(&resolve_dir(&self.location).join(self.name.trim()));
+            let exists =
+                name_ok && is_project_dir(&resolve_dir(&self.location).join(self.name.trim()));
             if self.location != self.found_for {
                 self.found = scan_projects(&resolve_dir(&self.location));
                 self.found_for = self.location.clone();
@@ -3029,8 +3041,11 @@ impl eframe::App for IcApp {
                         ui.monospace(&command);
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if primary_button(ui, t2(lang, "Разрешить и запустить", "Allow and run"))
-                                .clicked()
+                            if primary_button(
+                                ui,
+                                t2(lang, "Разрешить и запустить", "Allow and run"),
+                            )
+                            .clicked()
                             {
                                 action = Some(Action::TrustLang(id.clone()));
                             }
