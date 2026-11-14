@@ -3011,9 +3011,7 @@ impl eframe::App for IcApp {
 }
 
 pub fn run() -> eframe::Result<()> {
-    confine_caches().map_err(|e| {
-        eframe::Error::AppCreation(Box::new(std::io::Error::other(e)))
-    })?;
+    confine_caches().map_err(|e| eframe::Error::AppCreation(Box::new(std::io::Error::other(e))))?;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 760.0])
