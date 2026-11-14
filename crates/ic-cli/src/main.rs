@@ -397,7 +397,7 @@ fn new_args(rest: &[&str]) {
 }
 
 fn confine_caches() {
-    ic_player::confine_caches();
+    or_die(ic_player::confine_caches());
 }
 
 #[cfg(windows)]

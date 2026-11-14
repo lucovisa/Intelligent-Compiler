@@ -58,23 +58,28 @@ fn project_path_is_safe(project_dir: &Path, path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn confine_caches() {
-    if let Some(dir) = exe_dir() {
-        let cache = dir.join("cache");
-        let _ = fs::create_dir_all(&cache);
-        let set = |k: &str, v: &std::ffi::OsStr| {
-            if env::var_os(k).is_none() {
-                env::set_var(k, v);
-            }
-        };
-        set("MESA_SHADER_CACHE_DIR", cache.as_os_str());
-        set("__GL_SHADER_DISK_CACHE_PATH", cache.as_os_str());
-        set("MESA_SHADER_CACHE_MAX_SIZE", std::ffi::OsStr::new("256M"));
-        set(
-            "__GL_SHADER_DISK_CACHE_SIZE",
-            std::ffi::OsStr::new("268435456"),
-        );
-    }
+fn confine_caches() -> Result<(), String> {
+    let dir = exe_dir().ok_or_else(|| "не удалось определить папку IC".to_string())?;
+    let cache = dir.join("cache");
+    let config = dir.join("settings");
+    let data = dir.join("data");
+    fs::create_dir_all(&cache).map_err(|e| format!("{}: {e}", cache.display()))?;
+    fs::create_dir_all(&config).map_err(|e| format!("{}: {e}", config.display()))?;
+    fs::create_dir_all(&data).map_err(|e| format!("{}: {e}", data.display()))?;
+
+    let set = |k: &str, v: &std::ffi::OsStr| env::set_var(k, v);
+    // Кэши графики и XDG — рядом с исполняемым файлом.
+    set("XDG_CACHE_HOME", cache.as_os_str());
+    set("XDG_CONFIG_HOME", config.as_os_str());
+    set("XDG_DATA_HOME", data.as_os_str());
+    set("MESA_SHADER_CACHE_DIR", cache.as_os_str());
+    set("__GL_SHADER_DISK_CACHE_PATH", cache.as_os_str());
+    set("MESA_SHADER_CACHE_MAX_SIZE", std::ffi::OsStr::new("256M"));
+    set(
+        "__GL_SHADER_DISK_CACHE_SIZE",
+        std::ffi::OsStr::new("268435456"),
+    );
+    Ok(())
 }
 
 fn system_prefers_dark() -> bool {
@@ -168,8 +173,8 @@ struct Settings {
 }
 
 impl Settings {
-    fn path() -> PathBuf {
-        exe_dir().unwrap_or_default().join("ic-settings.txt")
+    fn path() -> Option<PathBuf> {
+        Some(exe_dir()?.join("settings").join("ic-settings.txt"))
     }
 
     fn load() -> Self {
@@ -181,26 +186,28 @@ impl Settings {
             recent: Vec::new(),
         };
         let mut saved_lang = None;
-        if let Ok(text) = fs::read_to_string(Self::path()) {
-            for line in text.lines() {
-                if let Some((k, v)) = line.split_once('=') {
-                    match (k.trim(), v.trim()) {
-                        ("theme", "system") => {
-                            s.theme_system = true;
-                            s.dark = system_prefers_dark();
+        if let Some(path) = Self::path() {
+            if let Ok(text) = fs::read_to_string(path) {
+                for line in text.lines() {
+                    if let Some((k, v)) = line.split_once('=') {
+                        match (k.trim(), v.trim()) {
+                            ("theme", "system") => {
+                                s.theme_system = true;
+                                s.dark = system_prefers_dark();
+                            }
+                            ("theme", "dark") => {
+                                s.theme_system = false;
+                                s.dark = true;
+                            }
+                            ("theme", "light") => {
+                                s.theme_system = false;
+                                s.dark = false;
+                            }
+                            ("lang", v) => saved_lang = Lang::from_code(v),
+                            ("lang_explicit", "true") => s.lang_explicit = true,
+                            ("recent", v) if !v.is_empty() => s.recent.push(v.to_string()),
+                            _ => {}
                         }
-                        ("theme", "dark") => {
-                            s.theme_system = false;
-                            s.dark = true;
-                        }
-                        ("theme", "light") => {
-                            s.theme_system = false;
-                            s.dark = false;
-                        }
-                        ("lang", v) => saved_lang = Lang::from_code(v),
-                        ("lang_explicit", "true") => s.lang_explicit = true,
-                        ("recent", v) if !v.is_empty() => s.recent.push(v.to_string()),
-                        _ => {}
                     }
                 }
             }
@@ -229,7 +236,9 @@ impl Settings {
         for r in &self.recent {
             out.push_str(&format!("recent={r}\n"));
         }
-        let _ = fs::write(Self::path(), out);
+        if let Some(path) = Self::path() {
+            let _ = fs::write(path, out);
+        }
     }
 
     fn push_recent(&mut self, dir: &Path) {
@@ -3002,7 +3011,9 @@ impl eframe::App for IcApp {
 }
 
 pub fn run() -> eframe::Result<()> {
-    confine_caches();
+    confine_caches().map_err(|e| {
+        eframe::Error::AppCreation(Box::new(std::io::Error::other(e)))
+    })?;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 760.0])

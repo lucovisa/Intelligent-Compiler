@@ -9,7 +9,7 @@ use winit::{
     event::{ElementState, Event, KeyEvent, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::WindowBuilder,
+    window::Window,
 };
 
 fn map_key(code: KeyCode) -> Option<Key> {
@@ -34,10 +34,12 @@ pub fn run<G: Game + 'static>(game: G, cfg: Config) {
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let window = Arc::new(
-        WindowBuilder::new()
-            .with_title(cfg.title)
-            .with_inner_size(LogicalSize::new(cfg.width as f64, cfg.height as f64))
-            .build(&event_loop)
+        event_loop
+            .create_window(
+                Window::default_attributes()
+                    .with_title(cfg.title)
+                    .with_inner_size(LogicalSize::new(cfg.width as f64, cfg.height as f64)),
+            )
             .expect("window"),
     );
 

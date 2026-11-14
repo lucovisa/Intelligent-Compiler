@@ -15,7 +15,10 @@ fn report(msg: &str) {
 }
 
 fn main() {
-    ic_player::confine_caches();
+    if let Err(e) = ic_player::confine_caches() {
+        report(&e);
+        exit(1);
+    }
     let files = env::current_exe()
         .ok()
         .and_then(|e| ic_build::read_embedded(&e));
