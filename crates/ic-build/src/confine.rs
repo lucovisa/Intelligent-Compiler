@@ -110,7 +110,10 @@ pub fn confine_env(base: &Path) -> Result<(), String> {
     set("MESA_SHADER_CACHE_DIR", cache.as_os_str());
     set("__GL_SHADER_DISK_CACHE_PATH", cache.as_os_str());
     set("MESA_SHADER_CACHE_MAX_SIZE", std::ffi::OsStr::new("256M"));
-    set("__GL_SHADER_DISK_CACHE_SIZE", std::ffi::OsStr::new("268435456"));
+    set(
+        "__GL_SHADER_DISK_CACHE_SIZE",
+        std::ffi::OsStr::new("268435456"),
+    );
     // Временные файлы
     for k in ["TMPDIR", "TEMP", "TMP"] {
         set(k, tmp.as_os_str());
