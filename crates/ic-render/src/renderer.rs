@@ -58,6 +58,8 @@ impl Renderer {
                 label: Some("ic device"),
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::default(),
+                // Память: подсказки по умолчанию (поле появилось в wgpu 22)
+                memory_hints: wgpu::MemoryHints::default(),
             },
             None,
         ))
@@ -147,6 +149,8 @@ impl Renderer {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            // Кэш пайплайна: не используем (поле появилось в wgpu 22)
+            cache: None,
         });
 
         let inst_cap = 1024;

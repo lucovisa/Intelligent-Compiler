@@ -249,6 +249,11 @@ fn resolve_runtime(target: &str) -> Result<(Runtime, &'static str), String> {
 }
 
 fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
+    // Проект и явный путь вывода выбраны пользователем
+    ic_build::confine::allow(dir);
+    if let Some(parent) = out.and_then(Path::parent) {
+        ic_build::confine::allow(parent);
+    }
     let t0 = Instant::now();
     let total = if pack { 4 } else { 3 };
     let exe = or_die(env::current_exe().map_err(|e| e.to_string()));

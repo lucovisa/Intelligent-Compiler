@@ -1,3 +1,4 @@
+use ic_build::confine;
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -36,11 +37,16 @@ fn run_ok(cmd: &mut Command, what: &str) -> Result<(), String> {
 }
 
 fn download(url: &str, to: &Path) -> Result<(), String> {
+    // Temp и кэши curl — внутрь папки загрузки
+    let dir = to.parent().unwrap_or(Path::new("."));
     run_ok(
-        Command::new("curl")
-            .args(["-fL", "--proto", "=https", "--tlsv1.2", "-o"])
-            .arg(to)
-            .arg(url),
+        confine::child_env(
+            Command::new("curl")
+                .args(["-fL", "--proto", "=https", "--tlsv1.2", "-o"])
+                .arg(to)
+                .arg(url),
+            dir,
+        ),
         &format!("скачивание {url}"),
     )
 }
@@ -56,11 +62,14 @@ fn setup_zig(ic: &Path) -> Result<(), String> {
             &archive,
         )?;
         run_ok(
-            Command::new("tar")
-                .arg("-xf")
-                .arg(&archive)
-                .arg("-C")
-                .arg(ic),
+            confine::child_env(
+                Command::new("tar")
+                    .arg("-xf")
+                    .arg(&archive)
+                    .arg("-C")
+                    .arg(ic),
+                ic,
+            ),
             "распаковка Zig",
         )?;
         fs::rename(ic.join(&name), &zig_dir).map_err(|e| e.to_string())?;
@@ -74,6 +83,8 @@ fn setup_zig(ic: &Path) -> Result<(), String> {
 }
 
 pub fn setup(project: &Path) -> Result<(), String> {
+    // Проект выбран пользователем — писать в него можно
+    confine::allow(project);
     if !cfg!(windows) && Command::new("cc").arg("--version").output().is_err() {
         return Err("нужен C-компилятор (cc). Linux: поставь gcc/build-essential, macOS: xcode-select --install".into());
     }
@@ -99,22 +110,28 @@ pub fn setup(project: &Path) -> Result<(), String> {
             let init = ic.join("rustup-init.exe");
             download("https://win.rustup.rs/x86_64", &init)?;
             run_ok(
-                Command::new(&init)
-                    .args(args)
-                    .args(["--default-host", "x86_64-pc-windows-gnu"])
-                    .env("RUSTUP_HOME", &rustup_home)
-                    .env("CARGO_HOME", &cargo_home),
+                confine::child_env(
+                    Command::new(&init)
+                        .args(args)
+                        .args(["--default-host", "x86_64-pc-windows-gnu"])
+                        .env("RUSTUP_HOME", &rustup_home)
+                        .env("CARGO_HOME", &cargo_home),
+                    &ic,
+                ),
                 "rustup-init",
             )?;
         } else {
             let script = ic.join("rustup.sh");
             download("https://sh.rustup.rs", &script)?;
             run_ok(
-                Command::new("sh")
-                    .arg(&script)
-                    .args(args)
-                    .env("RUSTUP_HOME", &rustup_home)
-                    .env("CARGO_HOME", &cargo_home),
+                confine::child_env(
+                    Command::new("sh")
+                        .arg(&script)
+                        .args(args)
+                        .env("RUSTUP_HOME", &rustup_home)
+                        .env("CARGO_HOME", &cargo_home),
+                    &ic,
+                ),
                 "rustup",
             )?;
         }
@@ -136,6 +153,8 @@ pub fn setup(project: &Path) -> Result<(), String> {
 }
 
 pub fn cargo(project: &Path, args: &[&str]) -> Result<(), String> {
+    // Проект выбран пользователем — писать в него можно
+    confine::allow(project);
     let root = absolute(project)?;
     let ic = root.join(".ic");
     let cargo_home = ic.join("cargo");
@@ -150,12 +169,15 @@ pub fn cargo(project: &Path, args: &[&str]) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     run_ok(
-        Command::new(cargo_exe)
-            .args(args)
-            .current_dir(&root)
-            .env("RUSTUP_HOME", ic.join("rustup"))
-            .env("CARGO_HOME", &cargo_home)
-            .env("PATH", new_path),
+        confine::child_env(
+            Command::new(cargo_exe)
+                .args(args)
+                .current_dir(&root)
+                .env("RUSTUP_HOME", ic.join("rustup"))
+                .env("CARGO_HOME", &cargo_home)
+                .env("PATH", new_path),
+            &ic,
+        ),
         "cargo",
     )
 }

@@ -1,3 +1,4 @@
+pub mod confine;
 pub mod scaffold;
 mod settings;
 
@@ -71,6 +72,8 @@ pub fn write_game(
     exe.extend((payload.len() as u64).to_le_bytes());
     exe.extend(MAGIC);
 
+    // Запись только в X или в путь, выбранный пользователем
+    confine::check(out)?;
     if let Some(parent) = out.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -150,6 +153,7 @@ mod tests {
     fn pack_roundtrip() {
         let base = std::env::temp_dir().join(format!("ic_build_test_{}", std::process::id()));
         let proj = base.join("game");
+        confine::allow(&base);
         fs::create_dir_all(proj.join("lib")).unwrap();
         fs::write(proj.join("main.lua"), "print(1)").unwrap();
         fs::write(proj.join("lib/util.lua"), "return {}").unwrap();
@@ -172,6 +176,7 @@ mod tests {
     fn write_game_with_embedded_runtime_bytes() {
         let base = std::env::temp_dir().join(format!("ic_build_bytes_{}", std::process::id()));
         let out = base.join("g.bin");
+        confine::allow(&base);
         let entries = vec![("main.lua".to_string(), b"x = 1".to_vec())];
         let size = write_game(&entries, b"RT", &out).unwrap();
         assert_eq!(size, fs::metadata(&out).unwrap().len());
