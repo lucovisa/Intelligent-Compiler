@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::RwLock};
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
     Ru,
@@ -82,7 +84,7 @@ impl Lang {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum K {
     Theme,
     Dark,
@@ -338,6 +340,9 @@ fn tr_base(lang: Lang, k: K) -> &'static str {
 }
 
 pub fn tr(lang: Lang, k: K) -> &'static str {
+    if let Some(s) = custom_k(k) {
+        return s;
+    }
     if lang == Lang::En || lang == Lang::Ru {
         return tr_base(lang, k);
     }
@@ -646,5 +651,301 @@ pub fn tr(lang: Lang, k: K) -> &'static str {
         (Lang::Es, K::CommandCloseProject) => "Cerrar proyecto",
         (Lang::Es, K::TypeCommand) => "Escribe un comando…",
         _ => tr_base(Lang::En, k),
+    }
+}
+
+impl K {
+    pub const ALL: &'static [K] = &[
+        K::Theme,
+        K::Dark,
+        K::Light,
+        K::Language,
+        K::StartTitle,
+        K::StartSub,
+        K::ProjectName,
+        K::Location,
+        K::Create,
+        K::OpenExisting,
+        K::Recent,
+        K::ErrName,
+        K::ErrNotProject,
+        K::ErrCreate,
+        K::IcMissing,
+        K::Save,
+        K::Close,
+        K::Unsaved,
+        K::NotText,
+        K::FoundProject,
+        K::WillCreate,
+        K::FoundList,
+        K::ProjSettings,
+        K::ProjSettingsNote,
+        K::SetTitle,
+        K::SetWindow,
+        K::SetTick,
+        K::SetBackground,
+        K::Cancel,
+        K::SettingsSaved,
+        K::Check,
+        K::CheckHint,
+        K::OpenHint,
+        K::SetName,
+        K::SetNameHint,
+        K::SetTarget,
+        K::TargetThis,
+        K::TargetHint,
+        K::ErrRename,
+        K::KindQuestion,
+        K::KindApp,
+        K::KindAppHint,
+        K::KindGame,
+        K::KindGameHint,
+        K::GameType,
+        K::Dim3DSoon,
+        K::DimCustom,
+        K::CustomLabel,
+        K::AddNow,
+        K::GenScene,
+        K::GenFps,
+        K::GenPhysics,
+        K::GenCamera,
+        K::DefaultCode,
+        K::DefaultCodeHint,
+        K::LaterHint,
+        K::CreateBtn,
+        K::Explorer,
+        K::NewFile,
+        K::NewFolder,
+        K::NewFileShort,
+        K::NewFolderShort,
+        K::AddGen,
+        K::Rename,
+        K::Delete,
+        K::ErrExists,
+        K::GenAdded,
+        K::SetKind,
+        K::Run,
+        K::Build,
+        K::BuildHint,
+        K::Log,
+        K::ClearLog,
+        K::SceneEditor,
+        K::AddSceneNode,
+        K::DeleteSceneNode,
+        K::Hierarchy,
+        K::Inspector,
+        K::SceneSaved,
+        K::QuickOpen,
+        K::Search,
+        K::SettingsIntro,
+        K::ProjectGroup,
+        K::WindowGroup,
+        K::SceneEmpty,
+        K::SceneSelectNode,
+        K::NodeName,
+        K::Position,
+        K::Size,
+        K::Color,
+        K::CanvasHint,
+        K::CommandPalette,
+        K::CommandSave,
+        K::CommandRun,
+        K::CommandBuild,
+        K::CommandQuickOpen,
+        K::CommandSearch,
+        K::CommandScene,
+        K::CommandSettings,
+        K::CommandCloseProject,
+        K::TypeCommand,
+    ];
+}
+
+// Английские тексты, которые тоже можно переводить (ключ — сам английский текст)
+pub const T2_KEYS: &[&str] = &[
+    "Main menu",
+    "Run",
+    "Theme",
+    "Script",
+    "Run the compiler?",
+    "IC will run this compiler:",
+    "Build command:",
+    "Allow and run",
+    "Modules",
+    "Node type",
+    "New version",
+    "You have the latest version",
+    "No releases on GitHub yet",
+    "updated, restart IC",
+    "C++ installed",
+    "Downloads",
+    "Updates and extra languages",
+    "IC UPDATE",
+    "Installed version",
+    "Please wait…",
+    "Install",
+    "Check for updates",
+    "LANGUAGES",
+    "Installed",
+    "Download",
+    "soon",
+    "Your own language or theme: a .lang file in IC-data/languages, a .theme file in IC-data/themes (see _template.txt)",
+];
+
+pub struct Custom {
+    by_k: HashMap<K, &'static str>,
+    by_text: HashMap<String, &'static str>,
+}
+
+static CUSTOM: RwLock<Option<Custom>> = RwLock::new(None);
+
+pub fn set_custom(c: Option<Custom>) {
+    *CUSTOM.write().unwrap_or_else(|e| e.into_inner()) = c;
+}
+
+fn custom_k(k: K) -> Option<&'static str> {
+    CUSTOM
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|c| c.by_k.get(&k).copied())
+}
+
+pub fn custom_text(en: &str) -> Option<&'static str> {
+    CUSTOM
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|c| c.by_text.get(en).copied())
+}
+
+// Язык интерфейса из файла `*.lang` с полем `interface`
+pub struct UiLang {
+    pub id: String,
+    pub name: String,
+    pub base: Lang,
+    pub strings: Vec<(String, String)>,
+}
+
+fn escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+}
+
+// Строка в кавычках с экранированием; возвращает значение и остаток
+fn parse_quoted(s: &str) -> Option<(String, &str)> {
+    let mut chars = s.strip_prefix('"')?.char_indices();
+    let rest_start = 1;
+    let mut out = String::new();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '"' => return Some((out, &s[rest_start + i + 1..])),
+            '\\' => match chars.next()?.1 {
+                'n' => out.push('\n'),
+                other => out.push(other),
+            },
+            _ => out.push(c),
+        }
+    }
+    None
+}
+
+pub fn is_ui_lang_text(text: &str) -> bool {
+    text.lines().any(|l| l.trim_start().starts_with("interface"))
+}
+
+pub fn parse_ui_lang(text: &str, id: &str) -> Result<UiLang, String> {
+    let mut lang = UiLang {
+        id: id.to_string(),
+        name: String::new(),
+        base: Lang::En,
+        strings: Vec::new(),
+    };
+    for (n, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (key, after): (String, String) = if line.starts_with('"') {
+            let (k, r) = parse_quoted(line).ok_or_else(|| format!("{id}: строка {}: неверный ключ", n + 1))?;
+            (k, r.to_string())
+        } else {
+            let (k, r) = line
+                .split_once('=')
+                .ok_or_else(|| format!("{id}: строка {}: нет «=»", n + 1))?;
+            (k.trim().to_string(), format!("={r}"))
+        };
+        let rest = after
+            .trim_start()
+            .strip_prefix('=')
+            .ok_or_else(|| format!("{id}: строка {}: нет «=»", n + 1))?;
+        let (value, _) = parse_quoted(rest.trim_start())
+            .ok_or_else(|| format!("{id}: строка {}: значение должно быть в кавычках", n + 1))?;
+        match key.as_str() {
+            "interface" => lang.name = value,
+            "base" => lang.base = Lang::from_code(&value).unwrap_or(Lang::En),
+            _ => lang.strings.push((key, value)),
+        }
+    }
+    if lang.name.is_empty() {
+        return Err(format!("{id}: нет названия interface"));
+    }
+    Ok(lang)
+}
+
+pub fn build_custom(l: &UiLang) -> Custom {
+    let names: HashMap<String, K> = K::ALL.iter().map(|k| (format!("{k:?}"), *k)).collect();
+    let mut c = Custom { by_k: HashMap::new(), by_text: HashMap::new() };
+    for (key, value) in &l.strings {
+        let value: &'static str = Box::leak(value.clone().into_boxed_str());
+        if let Some(k) = names.get(key) {
+            c.by_k.insert(*k, value);
+        } else {
+            c.by_text.insert(key.clone(), value);
+        }
+    }
+    c
+}
+
+// Шаблон для перевода: все ключи с английскими текстами
+pub fn template_text() -> String {
+    let mut out = String::from("interface = \"My language\"\nbase = \"en\"\n");
+    for k in K::ALL {
+        out.push_str(&format!("{k:?} = \"{}\"\n", escape(tr_base(Lang::En, *k))));
+    }
+    for key in T2_KEYS {
+        out.push_str(&format!("\"{}\" = \"{}\"\n", escape(key), escape(key)));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_roundtrips_and_overrides() {
+        let text = template_text();
+        let lang = parse_ui_lang(&text, "tpl").unwrap();
+        assert_eq!(lang.name, "My language");
+        assert_eq!(lang.strings.len(), K::ALL.len() + T2_KEYS.len());
+    }
+
+    #[test]
+    fn custom_language_overrides_strings() {
+        let lang = parse_ui_lang(
+            "interface = \"Тест\"\nbase = \"en\"\nSave = \"Зберегти\"\n\"Main menu\" = \"Меню\"\n",
+            "t",
+        )
+        .unwrap();
+        set_custom(Some(build_custom(&lang)));
+        assert_eq!(tr(Lang::En, K::Save), "Зберегти");
+        assert_eq!(custom_text("Main menu"), Some("Меню"));
+        set_custom(None);
+        assert_ne!(tr(Lang::En, K::Save), "Зберегти");
+    }
+
+    #[test]
+    fn broken_language_is_rejected() {
+        assert!(parse_ui_lang("Save = Зберегти\n", "x").is_err());
+        assert!(parse_ui_lang("Save = \"x\"\n", "x").is_err());
     }
 }

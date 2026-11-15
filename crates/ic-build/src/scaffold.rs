@@ -2,7 +2,7 @@ use crate::ProjectSettings;
 use std::{fs, path::Path};
 
 pub const DEMO: &str = include_str!("../templates/demo.lua");
-const SCENE: &str = include_str!("../templates/scene.lua");
+pub const SCENE: &str = include_str!("../templates/scene.lua");
 const FPS: &str = include_str!("../templates/fps.lua");
 const PHYSICS: &str = include_str!("../templates/physics.lua");
 const CAMERA: &str = include_str!("../templates/camera.lua");
