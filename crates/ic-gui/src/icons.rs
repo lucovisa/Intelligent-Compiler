@@ -42,17 +42,33 @@ pub fn file_icon(painter: &egui::Painter, rect: egui::Rect, name: &str) {
             );
         }
         "toml" => {
-            painter.rect_filled(rect.shrink(s * 0.06), 3.0, Color32::from_rgb(0xA5, 0x4B, 0x2A));
+            painter.rect_filled(
+                rect.shrink(s * 0.06),
+                3.0,
+                Color32::from_rgb(0xA5, 0x4B, 0x2A),
+            );
             label(painter, c, "T", s * 0.7, white);
         }
-        "json" => label(painter, c, "{}", s * 0.85, Color32::from_rgb(0xE5, 0xC0, 0x3A)),
+        "json" => label(
+            painter,
+            c,
+            "{}",
+            s * 0.85,
+            Color32::from_rgb(0xE5, 0xC0, 0x3A),
+        ),
         "md" | "mdx" => {
             painter.rect_stroke(
                 rect.shrink(s * 0.08),
                 Rounding::same(3.0),
                 Stroke::new(1.3_f32, Color32::from_rgb(0x56, 0xA5, 0xD8)),
             );
-            label(painter, c, "M", s * 0.62, Color32::from_rgb(0x56, 0xA5, 0xD8));
+            label(
+                painter,
+                c,
+                "M",
+                s * 0.62,
+                Color32::from_rgb(0x56, 0xA5, 0xD8),
+            );
         }
         "cpp" | "cc" | "cxx" => {
             hexagon(painter, c, s * 0.5, Color32::from_rgb(0x2F, 0x76, 0xC8));
@@ -72,12 +88,34 @@ pub fn file_icon(painter: &egui::Painter, rect: egui::Rect, name: &str) {
         }
         "rs" => {
             painter.circle_filled(c, s * 0.45, Color32::from_rgb(0xE0, 0x84, 0x55));
-            label(painter, c, "R", s * 0.6, Color32::from_rgb(0x3A, 0x1D, 0x10));
+            label(
+                painter,
+                c,
+                "R",
+                s * 0.6,
+                Color32::from_rgb(0x3A, 0x1D, 0x10),
+            );
         }
-        "zig" => label(painter, c, "Z", s * 0.95, Color32::from_rgb(0xF7, 0xA4, 0x1D)),
-        "py" => label(painter, c, "Py", s * 0.7, Color32::from_rgb(0x56, 0x9C, 0xD6)),
+        "zig" => label(
+            painter,
+            c,
+            "Z",
+            s * 0.95,
+            Color32::from_rgb(0xF7, 0xA4, 0x1D),
+        ),
+        "py" => label(
+            painter,
+            c,
+            "Py",
+            s * 0.7,
+            Color32::from_rgb(0x56, 0x9C, 0xD6),
+        ),
         "js" | "mjs" => {
-            painter.rect_filled(rect.shrink(s * 0.06), 2.0, Color32::from_rgb(0xE5, 0xC0, 0x3A));
+            painter.rect_filled(
+                rect.shrink(s * 0.06),
+                2.0,
+                Color32::from_rgb(0xE5, 0xC0, 0x3A),
+            );
             label(painter, c, "JS", s * 0.5, Color32::BLACK);
         }
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" => {
@@ -96,17 +134,27 @@ pub fn file_icon(painter: &egui::Painter, rect: egui::Rect, name: &str) {
                 green,
                 Stroke::NONE,
             ));
-            painter.circle_filled(egui::pos2(rect.right() - s * 0.28, rect.top() + s * 0.3), s * 0.09, green);
+            painter.circle_filled(
+                egui::pos2(rect.right() - s * 0.28, rect.top() + s * 0.3),
+                s * 0.09,
+                green,
+            );
         }
         "wav" | "ogg" | "mp3" | "flac" => {
             let purple = Color32::from_rgb(0xB0, 0x7C, 0xD8);
             painter.circle_filled(c + egui::vec2(-s * 0.12, s * 0.22), s * 0.17, purple);
             painter.line_segment(
-                [c + egui::vec2(s * 0.03, s * 0.2), c + egui::vec2(s * 0.03, -s * 0.32)],
+                [
+                    c + egui::vec2(s * 0.03, s * 0.2),
+                    c + egui::vec2(s * 0.03, -s * 0.32),
+                ],
                 Stroke::new(1.5_f32, purple),
             );
             painter.line_segment(
-                [c + egui::vec2(s * 0.03, -s * 0.32), c + egui::vec2(s * 0.3, -s * 0.18)],
+                [
+                    c + egui::vec2(s * 0.03, -s * 0.32),
+                    c + egui::vec2(s * 0.3, -s * 0.18),
+                ],
                 Stroke::new(1.5_f32, purple),
             );
         }
@@ -136,7 +184,11 @@ pub fn file_icon(painter: &egui::Painter, rect: egui::Rect, name: &str) {
             }
         }
         "lang" => {
-            painter.rect_filled(rect.shrink(s * 0.06), 3.0, Color32::from_rgb(0x6C, 0x8E, 0xBF));
+            painter.rect_filled(
+                rect.shrink(s * 0.06),
+                3.0,
+                Color32::from_rgb(0x6C, 0x8E, 0xBF),
+            );
             label(painter, c, "L", s * 0.62, white);
         }
         _ => {
@@ -155,11 +207,17 @@ pub fn file_icon(painter: &egui::Painter, rect: egui::Rect, name: &str) {
                 Stroke::new(1.2_f32, gray),
             ));
             painter.line_segment(
-                [egui::pos2(r.right() - fold, r.top()), egui::pos2(r.right() - fold, r.top() + fold)],
+                [
+                    egui::pos2(r.right() - fold, r.top()),
+                    egui::pos2(r.right() - fold, r.top() + fold),
+                ],
                 Stroke::new(1.0_f32, gray),
             );
             painter.line_segment(
-                [egui::pos2(r.right() - fold, r.top() + fold), egui::pos2(r.right(), r.top() + fold)],
+                [
+                    egui::pos2(r.right() - fold, r.top() + fold),
+                    egui::pos2(r.right(), r.top() + fold),
+                ],
                 Stroke::new(1.0_f32, gray),
             );
         }
@@ -177,7 +235,10 @@ pub fn folder_icon(painter: &egui::Painter, rect: egui::Rect, open: bool) {
     let y1 = rect.bottom() - s * 0.16;
     // Ушко папки
     painter.rect_filled(
-        egui::Rect::from_min_max(egui::pos2(x0, y0 - s * 0.08), egui::pos2(x0 + s * 0.42, y0 + s * 0.1)),
+        egui::Rect::from_min_max(
+            egui::pos2(x0, y0 - s * 0.08),
+            egui::pos2(x0 + s * 0.42, y0 + s * 0.1),
+        ),
         Rounding::same(1.5),
         back,
     );
@@ -220,7 +281,10 @@ pub fn tool_button(ui: &mut egui::Ui, tool: Tool, tip: &str) -> egui::Response {
         ui.painter()
             .rect_filled(rect, 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
     }
-    let icon = egui::Rect::from_center_size(rect.center() + egui::vec2(-1.0, 0.0), egui::vec2(14.0, 14.0));
+    let icon = egui::Rect::from_center_size(
+        rect.center() + egui::vec2(-1.0, 0.0),
+        egui::vec2(14.0, 14.0),
+    );
     let painter = ui.painter();
     match tool {
         Tool::NewFile => file_icon(painter, icon, "a.txt"),
@@ -230,14 +294,26 @@ pub fn tool_button(ui: &mut egui::Ui, tool: Tool, tip: &str) -> egui::Response {
     // Плюс в правом нижнем углу
     let plus = rect.right_bottom() + egui::vec2(-5.0, -5.0);
     let color = ui.visuals().text_color();
-    painter.line_segment([plus + egui::vec2(-3.0, 0.0), plus + egui::vec2(3.0, 0.0)], Stroke::new(1.5_f32, color));
-    painter.line_segment([plus + egui::vec2(0.0, -3.0), plus + egui::vec2(0.0, 3.0)], Stroke::new(1.5_f32, color));
+    painter.line_segment(
+        [plus + egui::vec2(-3.0, 0.0), plus + egui::vec2(3.0, 0.0)],
+        Stroke::new(1.5_f32, color),
+    );
+    painter.line_segment(
+        [plus + egui::vec2(0.0, -3.0), plus + egui::vec2(0.0, 3.0)],
+        Stroke::new(1.5_f32, color),
+    );
     resp.on_hover_text(tip)
 }
 
 // Название языка для строки состояния
 pub fn language_name(name: &str) -> &'static str {
-    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+    match name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "lua" => "Lua",
         "cpp" | "cc" | "cxx" | "hpp" | "hh" => "C++",
         "c" | "h" => "C",
@@ -257,8 +333,36 @@ pub fn language_name(name: &str) -> &'static str {
 pub fn has_builtin_icon(ext: &str) -> bool {
     matches!(
         ext,
-        "lua" | "toml" | "json" | "md" | "cpp" | "cc" | "cxx" | "hpp" | "hh" | "h" | "c" | "cs"
-            | "rs" | "zig" | "py" | "js" | "mjs" | "png" | "jpg" | "jpeg" | "gif" | "webp"
-            | "bmp" | "ico" | "wav" | "ogg" | "mp3" | "flac" | "wgsl" | "glsl" | "ic-scene"
+        "lua"
+            | "toml"
+            | "json"
+            | "md"
+            | "cpp"
+            | "cc"
+            | "cxx"
+            | "hpp"
+            | "hh"
+            | "h"
+            | "c"
+            | "cs"
+            | "rs"
+            | "zig"
+            | "py"
+            | "js"
+            | "mjs"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "ico"
+            | "wav"
+            | "ogg"
+            | "mp3"
+            | "flac"
+            | "wgsl"
+            | "glsl"
+            | "ic-scene"
     )
 }
