@@ -19,7 +19,11 @@ pub fn parse_version(s: &str) -> Option<[u32; 3]> {
             .parse::<u32>()
             .ok()
     });
-    Some([parts.next()??, parts.next().unwrap_or(Some(0))?, parts.next().unwrap_or(Some(0))?])
+    Some([
+        parts.next()??,
+        parts.next().unwrap_or(Some(0))?,
+        parts.next().unwrap_or(Some(0))?,
+    ])
 }
 
 pub fn is_newer(current: &str, latest: &str) -> bool {
@@ -75,7 +79,17 @@ pub fn download(url: &str, to: &Path) -> Result<(), String> {
 pub fn latest_tag() -> Result<Option<String>, String> {
     let sink = if cfg!(windows) { "NUL" } else { "/dev/null" };
     let out = Command::new("curl")
-        .args(["-sIL", "--proto", "=https", "-m", "20", "-o", sink, "-w", "%{url_effective}"])
+        .args([
+            "-sIL",
+            "--proto",
+            "=https",
+            "-m",
+            "20",
+            "-o",
+            sink,
+            "-w",
+            "%{url_effective}",
+        ])
         .arg(format!("https://github.com/{REPO}/releases/latest"))
         .output()
         .map_err(|e| format!("curl: {e}"))?;
@@ -88,7 +102,10 @@ pub fn latest_tag() -> Result<Option<String>, String> {
 pub fn download_update(tag: &str, dir: &Path) -> Result<PathBuf, String> {
     let to = dir.join(asset_name());
     download(
-        &format!("https://github.com/{REPO}/releases/download/{tag}/{}", asset_name()),
+        &format!(
+            "https://github.com/{REPO}/releases/download/{tag}/{}",
+            asset_name()
+        ),
         &to,
     )?;
     Ok(to)
@@ -123,7 +140,8 @@ pub fn install_update(zip_path: &Path, exe: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .map_err(|e| e.to_string())?;
     }
     let mut old = exe.as_os_str().to_owned();
     old.push(".old");
@@ -154,12 +172,17 @@ fn zig_target() -> (&'static str, &'static str) {
     } else {
         "linux"
     };
-    let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
     (os, arch)
 }
 
 pub fn zig_exe(dest: &Path) -> PathBuf {
-    dest.join("zig").join(if cfg!(windows) { "zig.exe" } else { "zig" })
+    dest.join("zig")
+        .join(if cfg!(windows) { "zig.exe" } else { "zig" })
 }
 
 // Zig нужен для C++: `zig c++` — это встроенный clang
@@ -247,9 +270,11 @@ mod tests {
         let zip_path = dir.join("ic-test.zip");
         {
             let mut w = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
-            w.start_file("pkg/ic", zip::write::SimpleFileOptions::default()).unwrap();
+            w.start_file("pkg/ic", zip::write::SimpleFileOptions::default())
+                .unwrap();
             w.write_all(b"NEW").unwrap();
-            w.start_file("pkg/ic.exe", zip::write::SimpleFileOptions::default()).unwrap();
+            w.start_file("pkg/ic.exe", zip::write::SimpleFileOptions::default())
+                .unwrap();
             w.write_all(b"NEW").unwrap();
             w.finish().unwrap();
         }

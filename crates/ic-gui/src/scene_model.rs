@@ -44,8 +44,16 @@ pub fn is_visual(kind: &str) -> bool {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Drag {
-    Move { index: usize, start: (f32, f32), orig: (f32, f32) },
-    Resize { index: usize, handle: u8, orig: (f32, f32, f32, f32) },
+    Move {
+        index: usize,
+        start: (f32, f32),
+        orig: (f32, f32),
+    },
+    Resize {
+        index: usize,
+        handle: u8,
+        orig: (f32, f32, f32, f32),
+    },
     Pan,
 }
 
@@ -133,7 +141,11 @@ fn lua_string(s: &str) -> String {
 pub fn parse_scene(text: &str) -> Vec<SceneNode> {
     let mut nodes = Vec::new();
     let v2 = text.lines().any(|l| l.trim() == "ic-scene|2");
-    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
         let parts: Vec<&str> = line.split('|').collect();
         if parts.first() != Some(&"node") {
             continue;
@@ -141,8 +153,17 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
         if v2 && parts.len() == 12 {
             let f = |i: usize| parts[i].parse::<f32>().ok();
             let u = |i: usize| parts[i].parse::<u8>().ok();
-            if let (Some(x), Some(y), Some(w), Some(h), Some(r), Some(g), Some(b), Some(rot), Some(a)) =
-                (f(3), f(4), f(5), f(6), u(7), u(8), u(9), f(10), u(11))
+            if let (
+                Some(x),
+                Some(y),
+                Some(w),
+                Some(h),
+                Some(r),
+                Some(g),
+                Some(b),
+                Some(rot),
+                Some(a),
+            ) = (f(3), f(4), f(5), f(6), u(7), u(8), u(9), f(10), u(11))
             {
                 nodes.push(SceneNode {
                     kind: parts[1].to_string(),
@@ -241,8 +262,12 @@ fn ensure_loader(project: &Path) -> Result<(), String> {
     match fs::read_to_string(&path) {
         Ok(text) if text.contains("function scene.load") => Ok(()),
         Ok(text) => {
-            let start = LOADER.find("function scene.load").ok_or("шаблон scene.lua повреждён")?;
-            let end = LOADER.rfind("return scene").ok_or("шаблон scene.lua повреждён")?;
+            let start = LOADER
+                .find("function scene.load")
+                .ok_or("шаблон scene.lua повреждён")?;
+            let end = LOADER
+                .rfind("return scene")
+                .ok_or("шаблон scene.lua повреждён")?;
             let snippet = &LOADER[start..end];
             let patched = match text.rfind("return scene") {
                 Some(i) => format!("{}{}{}", &text[..i], snippet, &text[i..]),
@@ -264,7 +289,9 @@ impl SceneEditor {
             return;
         }
         let path = dir.join(SCENE_FILE);
-        self.nodes = fs::read_to_string(&path).map(|t| parse_scene(&t)).unwrap_or_default();
+        self.nodes = fs::read_to_string(&path)
+            .map(|t| parse_scene(&t))
+            .unwrap_or_default();
         self.selected = None;
         self.dirty = false;
         self.status = None;
@@ -312,7 +339,10 @@ impl SceneEditor {
         if !taken(base) {
             return base.to_string();
         }
-        (2..).map(|i| format!("{base}{i}")).find(|n| !taken(n)).unwrap_or_default()
+        (2..)
+            .map(|i| format!("{base}{i}"))
+            .find(|n| !taken(n))
+            .unwrap_or_default()
     }
 
     pub fn add_node_kind(&mut self, kind: &str) {
@@ -336,7 +366,10 @@ impl SceneEditor {
     }
 
     pub fn rename(&mut self, index: usize, new: &str) {
-        let clean: String = new.chars().filter(|c| !c.is_control() && *c != '|').collect();
+        let clean: String = new
+            .chars()
+            .filter(|c| !c.is_control() && *c != '|')
+            .collect();
         let clean = clean.trim();
         if clean.is_empty() || index >= self.nodes.len() || self.nodes[index].name == clean {
             return;
@@ -591,7 +624,9 @@ mod tests {
         s.add_node_kind("ColorRect");
         s.save().unwrap();
         assert!(dir.join("scenes/main.ic-scene").is_file());
-        assert!(fs::read_to_string(dir.join("scenes/main.lua")).unwrap().contains("ColorRect"));
+        assert!(fs::read_to_string(dir.join("scenes/main.lua"))
+            .unwrap()
+            .contains("ColorRect"));
         let loader = fs::read_to_string(dir.join("scene.lua")).unwrap();
         assert!(loader.contains("function scene.load"));
         assert!(loader.trim_end().ends_with("return scene"));
