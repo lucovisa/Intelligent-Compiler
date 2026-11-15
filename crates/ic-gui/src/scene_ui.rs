@@ -107,7 +107,7 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr(lang, K::Hierarchy)).small().strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.menu_button("＋", |ui| add_node_menu(ui, scene))
+            ui.menu_button("+", |ui| add_node_menu(ui, scene))
                 .response
                 .on_hover_text(tr(lang, K::AddSceneNode));
         });
@@ -123,17 +123,10 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
                 let color = node_color(&kind);
                 let resp = ui
                     .horizontal(|ui| {
-                        let (r, _) =
-                            ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-                        ui.painter().rect_filled(
-                            r,
-                            3.0,
-                            Color32::from_rgb(color[0], color[1], color[2]),
-                        );
-                        ui.selectable_label(
-                            scene.selected == Some(index),
-                            format!("{name}  ·  {kind}"),
-                        )
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                        ui.painter()
+                            .rect_filled(r, 3.0, Color32::from_rgb(color[0], color[1], color[2]));
+                        ui.selectable_label(scene.selected == Some(index), format!("{name}  ·  {kind}"))
                     })
                     .inner;
                 if resp.clicked() {
@@ -157,25 +150,37 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
     }
 }
 
-// Панель сохранения; true — нажали «Сохранить»
-pub fn scene_toolbar_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) -> bool {
+// Панель сцены: сохранить и модули (FPS, физика, камера)
+pub fn scene_toolbar_ui(
+    ui: &mut egui::Ui,
+    scene: &mut SceneEditor,
+    lang: Lang,
+) -> (bool, Option<Generator>) {
     let mut save = false;
+    let mut generator = None;
     ui.horizontal(|ui| {
-        if button(ui, tr(lang, K::Save))
-            .on_hover_text("Ctrl+S")
-            .clicked()
-        {
+        if button(ui, tr(lang, K::Save)).on_hover_text("Ctrl+S").clicked() {
             save = true;
         }
+        ui.menu_button(t2(lang, "Модули", "Modules"), |ui| {
+            for g in Generator::ALL {
+                if g != Generator::Scene && ui.button(generator_label(lang, g)).clicked() {
+                    generator = Some(g);
+                    ui.close_menu();
+                }
+            }
+        });
         if scene.dirty {
-            ui.label(RichText::new("●").color(Color32::from_rgb(0xE5, 0xA0, 0x3B)));
+            let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+            ui.painter()
+                .circle_filled(r.center(), 4.0, Color32::from_rgb(0xE5, 0xA0, 0x3B));
         }
         if let Some(status) = &scene.status {
             ui.label(RichText::new(status).small().weak());
         }
     });
     ui.add_space(4.0);
-    save
+    (save, generator)
 }
 
 // Свойства выбранного узла (правая колонка)
@@ -191,7 +196,7 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
     {
         let node = &mut scene.nodes[index];
         let mut kind = node.kind.clone();
-        ui.label("Node type");
+        ui.label(t2(lang, "Тип узла", "Node type"));
         egui::ComboBox::from_id_source("scene_node_kind")
             .selected_text(&node.kind)
             .show_ui(ui, |ui| {
@@ -212,32 +217,20 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
         ui.label(tr(lang, K::Position));
         ui.horizontal(|ui| {
             ui.label("X");
-            dirty |= ui
-                .add(egui::DragValue::new(&mut node.x).speed(1.0))
-                .changed();
+            dirty |= ui.add(egui::DragValue::new(&mut node.x).speed(1.0)).changed();
             ui.label("Y");
-            dirty |= ui
-                .add(egui::DragValue::new(&mut node.y).speed(1.0))
-                .changed();
+            dirty |= ui.add(egui::DragValue::new(&mut node.y).speed(1.0)).changed();
         });
         ui.add_space(8.0);
         ui.label(tr(lang, K::Size));
         ui.horizontal(|ui| {
             ui.label("W");
             dirty |= ui
-                .add(
-                    egui::DragValue::new(&mut node.width)
-                        .speed(1.0)
-                        .range(8.0..=2048.0),
-                )
+                .add(egui::DragValue::new(&mut node.width).speed(1.0).range(8.0..=2048.0))
                 .changed();
             ui.label("H");
             dirty |= ui
-                .add(
-                    egui::DragValue::new(&mut node.height)
-                        .speed(1.0)
-                        .range(8.0..=2048.0),
-                )
+                .add(egui::DragValue::new(&mut node.height).speed(1.0).range(8.0..=2048.0))
                 .changed();
         });
         ui.add_space(8.0);

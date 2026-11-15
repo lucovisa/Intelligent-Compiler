@@ -1,4 +1,5 @@
 pub mod confine;
+pub mod downloads;
 pub mod langs;
 pub mod scaffold;
 mod settings;

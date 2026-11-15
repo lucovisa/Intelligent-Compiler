@@ -1,4 +1,6 @@
+mod downloads_ui;
 mod i18n;
+mod icons;
 mod scene_ui;
 
 use eframe::egui::{self, Color32, FontId, Margin, RichText, Rounding, Stroke};
@@ -676,14 +678,10 @@ fn load_png_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHan
     let data = &buf[..info.buffer_size()];
     let rgba: Vec<u8> = match info.color_type {
         png::ColorType::Rgba => data.to_vec(),
-        png::ColorType::Rgb => data
-            .chunks(3)
-            .flat_map(|c| [c[0], c[1], c[2], 255])
-            .collect(),
-        png::ColorType::GrayscaleAlpha => data
-            .chunks(2)
-            .flat_map(|c| [c[0], c[0], c[0], c[1]])
-            .collect(),
+        png::ColorType::Rgb => data.chunks(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => {
+            data.chunks(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect()
+        }
         png::ColorType::Grayscale => data.iter().flat_map(|g| [*g, *g, *g, 255]).collect(),
         _ => return None,
     };
@@ -740,7 +738,6 @@ fn explorer_rows(
     let row_h = 20.0;
     let indent = 12.0;
     let text_color = ui.visuals().text_color();
-    let folder_color = Color32::from_rgb(0xDC, 0xB6, 0x7A);
     let mut skip: Option<usize> = None;
 
     for f in &proj.files {
@@ -794,71 +791,35 @@ fn explorer_rows(
                     ]
                 };
                 painter.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
-                let body = egui::Rect::from_min_size(
-                    egui::pos2(x + 18.0, cy - 4.0),
-                    egui::vec2(14.0, 10.0),
-                );
-                painter.rect_filled(body, 2.0, folder_color);
-                let tab =
-                    egui::Rect::from_min_size(egui::pos2(x + 18.0, cy - 6.0), egui::vec2(6.0, 3.0));
-                painter.rect_filled(tab, 1.0, folder_color);
-            } else {
-                let body = egui::Rect::from_min_size(
-                    egui::pos2(x + 18.0, cy - 7.0),
-                    egui::vec2(22.0, 14.0),
-                );
-                let ext = f.name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-                let glyph = match ext.as_str() {
-                    "cpp" | "cc" | "cxx" | "hpp" | "h" => "C++",
-                    "rs" => "Rs",
-                    "lua" => "Lu",
-                    "js" | "jsx" | "mjs" => "JS",
-                    "ts" | "tsx" => "TS",
-                    "py" => "Py",
-                    "json" => "{}",
-                    "toml" => "T",
-                    "md" | "mdx" => "M",
-                    "html" | "htm" => "5",
-                    "css" | "scss" => "#",
-                    "wgsl" | "glsl" => "◇",
-                    "cs" => "C#",
-                    "zig" => "Zg",
-                    _ => "·",
-                };
-                // Свой язык: значок из описания, иначе встроенный
-                if let Some(custom) = langs.icons.get(&ext) {
-                    painter.rect_filled(body, 3.0, custom.color.gamma_multiply(0.22));
-                    if let Some(tex) = &custom.texture {
-                        let icon =
-                            egui::Rect::from_center_size(body.center(), egui::vec2(16.0, 16.0));
-                        painter.image(
-                            tex.id(),
-                            icon,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            Color32::WHITE,
-                        );
-                    } else {
-                        painter.text(
-                            body.center(),
-                            egui::Align2::CENTER_CENTER,
-                            &custom.badge,
-                            FontId::proportional(9.0),
-                            custom.color,
-                        );
-                    }
+            }
+            // Значок: у папки, у файла и у своего языка
+            let icon_rect = egui::Rect::from_min_size(egui::pos2(x + 18.0, cy - 8.0), egui::vec2(16.0, 16.0));
+            let ext = f.name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+            if f.is_dir {
+                icons::folder_icon(painter, icon_rect, !collapsed);
+            } else if let Some(custom) = langs.icons.get(&ext) {
+                if let Some(tex) = &custom.texture {
+                    painter.image(
+                        tex.id(),
+                        icon_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
                 } else {
-                    painter.rect_filled(body, 3.0, file_color(&f.name).gamma_multiply(0.22));
+                    painter.rect_filled(icon_rect.shrink(1.0), 3.0, custom.color);
                     painter.text(
-                        body.center(),
+                        icon_rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        glyph,
-                        FontId::proportional(9.0),
-                        file_color(&f.name),
+                        &custom.badge,
+                        FontId::proportional(8.5),
+                        Color32::WHITE,
                     );
                 }
+            } else {
+                icons::file_icon(painter, icon_rect, &f.name);
             }
             painter.text(
-                egui::pos2(x + 38.0, cy),
+                egui::pos2(x + 40.0, cy),
                 egui::Align2::LEFT_CENTER,
                 &f.name,
                 egui::FontId::proportional(13.0),
@@ -1202,6 +1163,9 @@ enum Action {
     RunLang(String),
     TrustLang(String),
     CancelTrust,
+    CheckUpdate,
+    InstallUpdate,
+    InstallCpp,
 }
 
 struct IcApp {
@@ -1231,6 +1195,9 @@ struct IcApp {
     ctx: egui::Context,
     langs: LangSet,
     trust_prompt: Option<String>,
+    dl: downloads_ui::DownloadState,
+    dl_tx: Sender<downloads_ui::DlEvent>,
+    dl_rx: Receiver<downloads_ui::DlEvent>,
 }
 
 impl IcApp {
@@ -1243,6 +1210,7 @@ impl IcApp {
             .join("projects")
             .to_string_lossy()
             .into_owned();
+        let (dl_tx, dl_rx) = std::sync::mpsc::channel();
         let mut app = Self {
             settings,
             name: "my_game".into(),
@@ -1270,7 +1238,11 @@ impl IcApp {
             ctx: cc.egui_ctx.clone(),
             langs: LangSet::default(),
             trust_prompt: None,
+            dl: downloads_ui::DownloadState::default(),
+            dl_tx,
+            dl_rx,
         };
+        ic_build::downloads::cleanup_old_exe();
         app.reload_langs();
         app
     }
@@ -1609,6 +1581,9 @@ impl IcApp {
         for l in &list {
             let texture = l.icon.as_ref().and_then(|p| load_png_texture(&self.ctx, p));
             for ext in &l.extensions {
+                if texture.is_none() && icons::has_builtin_icon(ext) {
+                    continue;
+                }
                 icons.insert(
                     ext.clone(),
                     LangIcon {
@@ -1630,8 +1605,7 @@ impl IcApp {
             return;
         };
         if !project_path_is_safe(&proj.dir, &file) {
-            self.log
-                .push("run refused: file is outside the project".into());
+            self.log.push("run refused: file is outside the project".into());
             return;
         }
         let out_dir = proj.dir.join("build");
@@ -1841,6 +1815,9 @@ impl IcApp {
                 }
             }
             Action::CancelTrust => self.trust_prompt = None,
+            Action::CheckUpdate => self.dl_check_update(),
+            Action::InstallUpdate => self.dl_install_update(),
+            Action::InstallCpp => self.dl_install_cpp(),
             Action::ClearLog => self.log.clear(),
             Action::Check => {
                 self.save();
@@ -1988,6 +1965,7 @@ impl IcApp {
 
 impl eframe::App for IcApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.dl_poll();
         while let Ok(line) = self.rx.try_recv() {
             self.log.push(line);
         }
@@ -2086,18 +2064,14 @@ impl eframe::App for IcApp {
             }
         );
 
+        let project_name = self.project.as_ref().map(|p| p.name.clone());
         // Кнопка запуска для открытого файла на своём языке
         let run_lang: Option<(String, String)> = self
             .project
             .as_ref()
             .and_then(|proj| proj.open.as_ref())
             .and_then(|file| file.file_name())
-            .and_then(|name| {
-                self.langs
-                    .list
-                    .iter()
-                    .find(|l| l.matches(&name.to_string_lossy()))
-            })
+            .and_then(|name| self.langs.list.iter().find(|l| l.matches(&name.to_string_lossy())))
             .filter(|l| l.compiler.is_some() && !l.build.is_empty())
             .map(|l| (l.id.clone(), l.name.clone()));
 
@@ -2109,13 +2083,14 @@ impl eframe::App for IcApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if self.project.is_some() {
-                        if button(ui, tr(lang, K::Save))
-                            .on_hover_text("Ctrl+S")
-                            .clicked()
-                        {
-                            action = Some(Action::Save);
+                    if let Some(name) = &project_name {
+                        // Назад в главное меню
+                        if button(ui, t2(lang, "Главное меню", "Main menu")).clicked() {
+                            action = Some(Action::CloseProject);
                         }
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(name).strong());
+                        ui.add_space(8.0);
                         if primary_button(ui, tr(lang, K::Run))
                             .on_hover_text("F5")
                             .clicked()
@@ -2135,18 +2110,11 @@ impl eframe::App for IcApp {
                             action = Some(Action::Build);
                         }
                         if let Some((id, name)) = &run_lang {
-                            if primary_button(ui, &format!("▶ {name}")).clicked() {
+                            if primary_button(ui, &format!("{}: {name}", t2(lang, "Запустить", "Run")))
+                                .clicked()
+                            {
                                 action = Some(Action::RunLang(id.clone()));
                             }
-                        }
-                        if button(ui, tr(lang, K::SceneEditor)).clicked() {
-                            action = Some(Action::OpenScene);
-                        }
-                        if button(ui, tr(lang, K::ProjSettings)).clicked() {
-                            action = Some(Action::OpenSettings);
-                        }
-                        if button(ui, tr(lang, K::Close)).clicked() {
-                            action = Some(Action::CloseProject);
                         }
                     }
 
@@ -2173,6 +2141,17 @@ impl eframe::App for IcApp {
                                 }
                             });
                         ui.label(RichText::new(tr(lang, K::Language)).weak());
+                        if project_name.is_some() {
+                            if button(ui, tr(lang, K::ProjSettings)).clicked() {
+                                action = Some(Action::OpenSettings);
+                            }
+                            if button(ui, tr(lang, K::Save))
+                                .on_hover_text("Ctrl+S")
+                                .clicked()
+                            {
+                                action = Some(Action::Save);
+                            }
+                        }
                     });
                 });
             });
@@ -2267,6 +2246,51 @@ impl eframe::App for IcApp {
             }
         }
 
+        // Строка состояния, как в VS Code
+        {
+            let file_label = self
+                .project
+                .as_ref()
+                .and_then(|proj| {
+                    let open = proj.open.as_ref()?;
+                    let rel = open.strip_prefix(&proj.dir).unwrap_or(open);
+                    Some(rel.display().to_string())
+                })
+                .unwrap_or_default();
+            let kind_label = self
+                .project
+                .as_ref()
+                .and_then(|proj| proj.open.as_ref())
+                .and_then(|f| f.file_name())
+                .map(|n| icons::language_name(&n.to_string_lossy()))
+                .unwrap_or("");
+            egui::TopBottomPanel::bottom("status")
+                .exact_height(24.0)
+                .frame(
+                    egui::Frame::none()
+                        .fill(Color32::from_rgb(0x00, 0x78, 0xD4))
+                        .inner_margin(Margin::symmetric(12.0, 0.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal_centered(|ui| {
+                        let text = |t: &str| RichText::new(t.to_string()).small().color(Color32::WHITE);
+                        if let Some(name) = &project_name {
+                            ui.label(text(name));
+                            ui.label(text(&file_label));
+                        } else {
+                            ui.label(text(t2(lang, "Главное меню", "Main menu")));
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(text(&format!("IC v{}", env!("CARGO_PKG_VERSION"))));
+                            if !kind_label.is_empty() {
+                                ui.label(text("UTF-8"));
+                                ui.label(text(kind_label));
+                            }
+                        });
+                    });
+                });
+        }
+
         if has_project {
             egui::TopBottomPanel::bottom("log")
                 .resizable(true)
@@ -2330,22 +2354,16 @@ impl eframe::App for IcApp {
                     ui.horizontal(|ui| {
                         ui.add_space(10.0);
                         ui.label(RichText::new(tr(lang, K::Explorer)).small().strong());
-                    });
-                    ui.add_space(4.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.add_space(6.0);
-                        if ui.small_button(tr(lang, K::NewFileShort)).clicked() {
-                            action = Some(Action::PromptOpen(PromptKind::NewFile, base.clone()));
-                        }
-                        if ui.small_button(tr(lang, K::NewFolderShort)).clicked() {
-                            action = Some(Action::PromptOpen(PromptKind::NewFolder, base.clone()));
-                        }
-                        ui.menu_button(tr(lang, K::AddGen), |ui| {
-                            for g in Generator::ALL {
-                                if ui.button(generator_label(lang, g)).clicked() {
-                                    action = Some(Action::AddGenerator(g));
-                                    ui.close_menu();
-                                }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(6.0);
+                            if icons::tool_button(ui, icons::Tool::NewScene, tr(lang, K::GenScene)).clicked() {
+                                action = Some(Action::AddGenerator(Generator::Scene));
+                            }
+                            if icons::tool_button(ui, icons::Tool::NewFolder, tr(lang, K::NewFolder)).clicked() {
+                                action = Some(Action::PromptOpen(PromptKind::NewFolder, base.clone()));
+                            }
+                            if icons::tool_button(ui, icons::Tool::NewFile, tr(lang, K::NewFile)).clicked() {
+                                action = Some(Action::PromptOpen(PromptKind::NewFile, base.clone()));
                             }
                         });
                     });
@@ -2353,11 +2371,9 @@ impl eframe::App for IcApp {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.add_space(10.0);
-                        ui.label(
-                            RichText::new(format!("▾  📁 {}", proj.name))
-                                .strong()
-                                .small(),
-                        );
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                        icons::folder_icon(ui.painter(), r, true);
+                        ui.label(RichText::new(proj.name.to_uppercase()).strong().small());
                     });
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
@@ -2418,8 +2434,12 @@ impl eframe::App for IcApp {
                         }
                     });
                     if self.scene_editor.open {
-                        if scene_ui::scene_toolbar_ui(ui, &mut self.scene_editor, lang) {
+                        let (save, generator) = scene_ui::scene_toolbar_ui(ui, &mut self.scene_editor, lang);
+                        if save {
                             action = Some(Action::SaveScene);
+                        }
+                        if let Some(g) = generator {
+                            action = Some(Action::AddGenerator(g));
                         }
                         scene_ui::scene_canvas_ui(ui, &mut self.scene_editor, lang, dark, p.editor);
                         return;
@@ -2513,8 +2533,8 @@ impl eframe::App for IcApp {
                 let n = self.name.trim();
                 !n.is_empty() && !n.contains(['/', '\\'])
             };
-            let exists =
-                name_ok && is_project_dir(&resolve_dir(&self.location).join(self.name.trim()));
+            let cpp_ready = downloads_ui::cpp_installed();
+            let exists = name_ok && is_project_dir(&resolve_dir(&self.location).join(self.name.trim()));
             if self.location != self.found_for {
                 self.found = scan_projects(&resolve_dir(&self.location));
                 self.found_for = self.location.clone();
@@ -2530,6 +2550,10 @@ impl eframe::App for IcApp {
                     let top = (ui.available_height() * 0.12).min(90.0);
                     ui.vertical_centered(|ui| {
                         ui.add_space(top);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width().min(940.0), 0.0),
+                            egui::Layout::left_to_right(egui::Align::Min),
+                            |ui| {
                         ui.allocate_ui_with_layout(
                             egui::vec2(480.0, 0.0),
                             egui::Layout::top_down(egui::Align::Min),
@@ -2621,6 +2645,17 @@ impl eframe::App for IcApp {
                                         }
                                     }
                                 }
+                            },
+                        );
+                        ui.add_space(36.0);
+                        // Загрузки: обновление и языки
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(420.0, 0.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                downloads_ui::downloads_ui(ui, &self.dl, cpp_ready, lang, &mut action);
+                            },
+                        );
                             },
                         );
                     });
@@ -2949,8 +2984,11 @@ impl eframe::App for IcApp {
                         ui.add_space(8.0);
                         ui.label(RichText::new(tr(lang, K::AddNow)).strong());
                         ui.horizontal_wrapped(|ui| {
+                            // FPS, физика и камера — в редакторе сцен
                             for (i, g) in Generator::ALL.iter().enumerate() {
-                                ui.checkbox(&mut dlg.gens[i], generator_label(lang, *g));
+                                if *g == Generator::Scene {
+                                    ui.checkbox(&mut dlg.gens[i], generator_label(lang, *g));
+                                }
                             }
                         });
                     }
@@ -3041,11 +3079,8 @@ impl eframe::App for IcApp {
                         ui.monospace(&command);
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if primary_button(
-                                ui,
-                                t2(lang, "Разрешить и запустить", "Allow and run"),
-                            )
-                            .clicked()
+                            if primary_button(ui, t2(lang, "Разрешить и запустить", "Allow and run"))
+                                .clicked()
                             {
                                 action = Some(Action::TrustLang(id.clone()));
                             }
