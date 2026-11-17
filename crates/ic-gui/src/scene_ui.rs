@@ -123,7 +123,10 @@ fn eye_toggle(ui: &mut egui::Ui, on: bool) -> egui::Response {
         );
         p.circle_filled(c, 2.0, color);
     } else {
-        p.line_segment([c - egui::vec2(6.0, 0.0), c + egui::vec2(6.0, 0.0)], Stroke::new(1.3_f32, color.gamma_multiply(0.5)));
+        p.line_segment(
+            [c - egui::vec2(6.0, 0.0), c + egui::vec2(6.0, 0.0)],
+            Stroke::new(1.3_f32, color.gamma_multiply(0.5)),
+        );
     }
     resp
 }
@@ -131,14 +134,31 @@ fn eye_toggle(ui: &mut egui::Ui, on: bool) -> egui::Response {
 // Значок «замок»
 fn lock_toggle(ui: &mut egui::Ui, on: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(16.0, 14.0), egui::Sense::click());
-    let color = if on { ui.visuals().text_color() } else { ui.visuals().text_color().gamma_multiply(0.35) };
+    let color = if on {
+        ui.visuals().text_color()
+    } else {
+        ui.visuals().text_color().gamma_multiply(0.35)
+    };
     let p = ui.painter();
     let c = rect.center();
-    p.rect_filled(egui::Rect::from_center_size(c + egui::vec2(0.0, 2.0), egui::vec2(9.0, 6.0)), 1.5, color);
+    p.rect_filled(
+        egui::Rect::from_center_size(c + egui::vec2(0.0, 2.0), egui::vec2(9.0, 6.0)),
+        1.5,
+        color,
+    );
     let top = if on { c.y - 3.0 } else { c.y - 5.0 };
-    p.line_segment([egui::pos2(c.x - 2.5, c.y), egui::pos2(c.x - 2.5, top)], Stroke::new(1.3_f32, color));
-    p.line_segment([egui::pos2(c.x + 2.5, c.y), egui::pos2(c.x + 2.5, top)], Stroke::new(1.3_f32, color));
-    p.line_segment([egui::pos2(c.x - 2.5, top), egui::pos2(c.x + 2.5, top)], Stroke::new(1.3_f32, color));
+    p.line_segment(
+        [egui::pos2(c.x - 2.5, c.y), egui::pos2(c.x - 2.5, top)],
+        Stroke::new(1.3_f32, color),
+    );
+    p.line_segment(
+        [egui::pos2(c.x + 2.5, c.y), egui::pos2(c.x + 2.5, top)],
+        Stroke::new(1.3_f32, color),
+    );
+    p.line_segment(
+        [egui::pos2(c.x - 2.5, top), egui::pos2(c.x + 2.5, top)],
+        Stroke::new(1.3_f32, color),
+    );
     resp
 }
 
@@ -165,19 +185,28 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
                 let color = kind_rgb(&kind);
                 let row = ui.horizontal(|ui| {
                     let mut visible = scene.nodes[index].visible;
-                    if eye_toggle(ui, visible).on_hover_text(t2(lang, "Показать / скрыть", "Show / hide")).clicked() {
+                    if eye_toggle(ui, visible)
+                        .on_hover_text(t2(lang, "Показать / скрыть", "Show / hide"))
+                        .clicked()
+                    {
                         visible = !visible;
                         scene.nodes[index].visible = visible;
                     }
                     let mut locked = scene.nodes[index].locked;
-                    if lock_toggle(ui, locked).on_hover_text(t2(lang, "Заблокировать", "Lock")).clicked() {
+                    if lock_toggle(ui, locked)
+                        .on_hover_text(t2(lang, "Заблокировать", "Lock"))
+                        .clicked()
+                    {
                         locked = !locked;
                         scene.nodes[index].locked = locked;
                     }
-                    let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                    let (r, _) =
+                        ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
                     ui.painter().rect_filled(r, 3.0, color);
                     if scene.renaming == Some(index) {
-                        let edit = ui.add(egui::TextEdit::singleline(&mut scene.rename_buf).desired_width(130.0));
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut scene.rename_buf).desired_width(130.0),
+                        );
                         if !edit.has_focus() && !edit.lost_focus() {
                             edit.request_focus();
                         }
@@ -190,8 +219,15 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
                             scene.renaming = None;
                         }
                     } else {
-                        let resp = ui.selectable_label(scene.is_selected(index), format!("{name}  ·  {kind}"));
-                        let grab = ui.interact(resp.rect, ui.id().with(("scene_row", index)), egui::Sense::drag());
+                        let resp = ui.selectable_label(
+                            scene.is_selected(index),
+                            format!("{name}  ·  {kind}"),
+                        );
+                        let grab = ui.interact(
+                            resp.rect,
+                            ui.id().with(("scene_row", index)),
+                            egui::Sense::drag(),
+                        );
                         if grab.drag_started() {
                             scene.tree_drag = Some(index);
                         }
@@ -234,8 +270,15 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
     // Перетаскивание строк меняет порядок слоёв
     if let Some(from) = scene.tree_drag {
         let pointer = ui.input(|i| i.pointer.hover_pos());
-        let target = pointer.and_then(|p| rows.iter().find(|(_, r)| r.y_range().contains(p.y)).map(|(i, _)| *i));
-        if let (Some(t), Some((_, r))) = (target, target.and_then(|t| rows.iter().find(|(i, _)| *i == t))) {
+        let target = pointer.and_then(|p| {
+            rows.iter()
+                .find(|(_, r)| r.y_range().contains(p.y))
+                .map(|(i, _)| *i)
+        });
+        if let (Some(t), Some((_, r))) = (
+            target,
+            target.and_then(|t| rows.iter().find(|(i, _)| *i == t)),
+        ) {
             let y = if t > from { r.bottom() } else { r.top() };
             ui.painter().line_segment(
                 [egui::pos2(r.left(), y), egui::pos2(r.right(), y)],
@@ -275,10 +318,16 @@ pub fn scene_toolbar_ui(
     let mut generator = None;
     let mut run = false;
     ui.horizontal_wrapped(|ui| {
-        if button(ui, tr(lang, K::Save)).on_hover_text("Ctrl+S").clicked() {
+        if button(ui, tr(lang, K::Save))
+            .on_hover_text("Ctrl+S")
+            .clicked()
+        {
             save = true;
         }
-        if primary_button(ui, tr(lang, K::Run)).on_hover_text("F5").clicked() {
+        if primary_button(ui, tr(lang, K::Run))
+            .on_hover_text("F5")
+            .clicked()
+        {
             run = true;
         }
         ui.menu_button(t2(lang, "Модули", "Modules"), |ui| {
@@ -290,14 +339,20 @@ pub fn scene_toolbar_ui(
             }
         });
         if ui
-            .add_enabled(scene.can_undo(), egui::Button::new(t2(lang, "Отменить", "Undo")))
+            .add_enabled(
+                scene.can_undo(),
+                egui::Button::new(t2(lang, "Отменить", "Undo")),
+            )
             .on_hover_text("Ctrl+Z")
             .clicked()
         {
             scene.undo();
         }
         if ui
-            .add_enabled(scene.can_redo(), egui::Button::new(t2(lang, "Вернуть", "Redo")))
+            .add_enabled(
+                scene.can_redo(),
+                egui::Button::new(t2(lang, "Вернуть", "Redo")),
+            )
             .on_hover_text("Ctrl+Y")
             .clicked()
         {
@@ -308,7 +363,11 @@ pub fn scene_toolbar_ui(
         }
         ui.label(format!("{:.0}%", scene.zoom * 100.0));
         ui.checkbox(&mut scene.snap, t2(lang, "Сетка", "Snap"));
-        ui.add(egui::DragValue::new(&mut scene.grid).range(2.0..=256.0).speed(1.0));
+        ui.add(
+            egui::DragValue::new(&mut scene.grid)
+                .range(2.0..=256.0)
+                .speed(1.0),
+        );
         if scene.dirty {
             let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
             ui.painter()
@@ -333,8 +392,11 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
     let selected_count = scene.all_selected().len();
     if selected_count > 1 {
         ui.label(
-            RichText::new(format!("{} {selected_count}", t2(lang, "Выбрано узлов:", "Selected nodes:")))
-                .small(),
+            RichText::new(format!(
+                "{} {selected_count}",
+                t2(lang, "Выбрано узлов:", "Selected nodes:")
+            ))
+            .small(),
         );
     }
     let mut rename_to: Option<String> = None;
@@ -358,9 +420,17 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
         let visual = is_visual(&node.kind);
         ui.label(
             RichText::new(if visual {
-                t2(lang, "Рисуется в игре прямоугольником", "Drawn in game as a rectangle")
+                t2(
+                    lang,
+                    "Рисуется в игре прямоугольником",
+                    "Drawn in game as a rectangle",
+                )
             } else {
-                t2(lang, "В игре не рисуется (служебный узел)", "Not drawn in game (helper node)")
+                t2(
+                    lang,
+                    "В игре не рисуется (служебный узел)",
+                    "Not drawn in game (helper node)",
+                )
             })
             .small(),
         );
@@ -382,22 +452,43 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
         ui.label(tr(lang, K::Size));
         ui.horizontal(|ui| {
             ui.label("W");
-            ui.add(egui::DragValue::new(&mut node.width).speed(1.0).range(1.0..=8192.0));
+            ui.add(
+                egui::DragValue::new(&mut node.width)
+                    .speed(1.0)
+                    .range(1.0..=8192.0),
+            );
             ui.label("H");
-            ui.add(egui::DragValue::new(&mut node.height).speed(1.0).range(1.0..=8192.0));
+            ui.add(
+                egui::DragValue::new(&mut node.height)
+                    .speed(1.0)
+                    .range(1.0..=8192.0),
+            );
         });
         ui.label(t2(lang, "Поворот (градусы)", "Rotation (degrees)"));
-        ui.add(egui::DragValue::new(&mut node.rotation).speed(0.5).range(-360.0..=360.0));
+        ui.add(
+            egui::DragValue::new(&mut node.rotation)
+                .speed(0.5)
+                .range(-360.0..=360.0),
+        );
         ui.add_space(6.0);
         ui.label(tr(lang, K::Color));
         ui.color_edit_button_srgb(&mut node.color);
         ui.label(t2(lang, "Прозрачность", "Opacity"));
         let mut alpha = node.alpha as f32;
-        if ui.add(egui::Slider::new(&mut alpha, 0.0..=255.0).integer()).changed() {
+        if ui
+            .add(egui::Slider::new(&mut alpha, 0.0..=255.0).integer())
+            .changed()
+        {
             node.alpha = alpha as u8;
         }
-        ui.checkbox(&mut node.visible, t2(lang, "Виден в игре", "Visible in game"));
-        ui.checkbox(&mut node.locked, t2(lang, "Заблокирован в редакторе", "Locked in editor"));
+        ui.checkbox(
+            &mut node.visible,
+            t2(lang, "Виден в игре", "Visible in game"),
+        );
+        ui.checkbox(
+            &mut node.locked,
+            t2(lang, "Заблокирован в редакторе", "Locked in editor"),
+        );
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             if ui.button(t2(lang, "Выше", "Up")).clicked() {
@@ -526,8 +617,16 @@ pub fn scene_canvas_ui(
     let (pan, zoom) = (scene.pan, scene.zoom);
 
     // Сетка
-    let line = if dark { Color32::from_gray(48) } else { Color32::from_gray(228) };
-    let strong = if dark { Color32::from_gray(70) } else { Color32::from_gray(205) };
+    let line = if dark {
+        Color32::from_gray(48)
+    } else {
+        Color32::from_gray(228)
+    };
+    let strong = if dark {
+        Color32::from_gray(70)
+    } else {
+        Color32::from_gray(205)
+    };
     let mut step = scene.grid.max(2.0);
     while step * zoom < 10.0 {
         step *= 2.0;
@@ -556,11 +655,17 @@ pub fn scene_canvas_ui(
     }
     let origin = w2s(center, pan, zoom, 0.0, 0.0);
     painter.line_segment(
-        [egui::pos2(rect.left(), origin.y), egui::pos2(rect.right(), origin.y)],
+        [
+            egui::pos2(rect.left(), origin.y),
+            egui::pos2(rect.right(), origin.y),
+        ],
         Stroke::new(1.0_f32, Color32::from_rgb(0xC0, 0x50, 0x50)),
     );
     painter.line_segment(
-        [egui::pos2(origin.x, rect.top()), egui::pos2(origin.x, rect.bottom())],
+        [
+            egui::pos2(origin.x, rect.top()),
+            egui::pos2(origin.x, rect.bottom()),
+        ],
         Stroke::new(1.0_f32, Color32::from_rgb(0x50, 0xB0, 0x60)),
     );
     // Кадр камеры игры
@@ -568,7 +673,11 @@ pub fn scene_canvas_ui(
         w2s(center, pan, zoom, -FRAME_W / 2.0, FRAME_H / 2.0),
         w2s(center, pan, zoom, FRAME_W / 2.0, -FRAME_H / 2.0),
     );
-    painter.rect_stroke(frame, Rounding::ZERO, Stroke::new(1.5_f32, Color32::from_rgb(0x4F, 0x9D, 0xE8)));
+    painter.rect_stroke(
+        frame,
+        Rounding::ZERO,
+        Stroke::new(1.5_f32, Color32::from_rgb(0x4F, 0x9D, 0xE8)),
+    );
     painter.text(
         frame.left_top() + egui::vec2(4.0, -4.0),
         egui::Align2::LEFT_BOTTOM,
@@ -594,24 +703,38 @@ pub fn scene_canvas_ui(
         painter.add(egui::Shape::convex_polygon(
             pts.clone(),
             fill,
-            Stroke::new(if selected { 2.0 } else { 1.0_f32 }, if selected { Color32::WHITE } else { base }),
+            Stroke::new(
+                if selected { 2.0 } else { 1.0_f32 },
+                if selected { Color32::WHITE } else { base },
+            ),
         ));
         painter.text(
             w2s(center, pan, zoom, n.x, n.y),
             egui::Align2::CENTER_CENTER,
             &n.name,
             FontId::proportional(13.0),
-            if n.locked { Color32::from_gray(190) } else { Color32::WHITE },
+            if n.locked {
+                Color32::from_gray(190)
+            } else {
+                Color32::WHITE
+            },
         );
     }
     let single = scene.all_selected().len() == 1;
-    if let Some(i) = scene.selected.filter(|i| single && *i < scene.nodes.len() && !scene.nodes[*i].locked) {
+    if let Some(i) = scene
+        .selected
+        .filter(|i| single && *i < scene.nodes.len() && !scene.nodes[*i].locked)
+    {
         for h in 0..8 {
             let (hx, hy) = handle_pos(&scene.nodes[i], h);
             let p = w2s(center, pan, zoom, hx, hy);
             let r = egui::Rect::from_center_size(p, egui::vec2(8.0, 8.0));
             painter.rect_filled(r, 1.0, Color32::WHITE);
-            painter.rect_stroke(r, Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_rgb(0x1E, 0x6F, 0xD9)));
+            painter.rect_stroke(
+                r,
+                Rounding::ZERO,
+                Stroke::new(1.0_f32, Color32::from_rgb(0x1E, 0x6F, 0xD9)),
+            );
         }
     }
 
@@ -623,7 +746,9 @@ pub fn scene_canvas_ui(
         if scene.all_selected().len() != 1 {
             return None;
         }
-        let i = scene.selected.filter(|i| *i < scene.nodes.len() && !scene.nodes[*i].locked)?;
+        let i = scene
+            .selected
+            .filter(|i| *i < scene.nodes.len() && !scene.nodes[*i].locked)?;
         (0..8).find(|&h| {
             let (hx, hy) = handle_pos(&scene.nodes[i], h);
             w2s(center, pan, zoom, hx, hy).distance(p) <= 7.0
@@ -646,7 +771,8 @@ pub fn scene_canvas_ui(
         let origin_ptr = ui.input(|i| i.pointer.press_origin()).or(ptr);
         if let Some(p) = origin_ptr {
             let button_pan = ui.input(|i| {
-                i.pointer.button_down(egui::PointerButton::Middle) || i.pointer.button_down(egui::PointerButton::Secondary)
+                i.pointer.button_down(egui::PointerButton::Middle)
+                    || i.pointer.button_down(egui::PointerButton::Secondary)
             });
             let (wx, wy) = s2w(center, pan, zoom, p);
             if button_pan || space {
@@ -671,9 +797,15 @@ pub fn scene_canvas_ui(
                     .filter(|j| !scene.nodes[*j].locked)
                     .map(|j| (j, scene.nodes[j].x, scene.nodes[j].y))
                     .collect();
-                scene.drag = Some(Drag::Move { start: (wx, wy), origs });
+                scene.drag = Some(Drag::Move {
+                    start: (wx, wy),
+                    origs,
+                });
             } else {
-                scene.drag = Some(Drag::Marquee { start: (wx, wy), additive: mods.shift || mods.command });
+                scene.drag = Some(Drag::Marquee {
+                    start: (wx, wy),
+                    additive: mods.shift || mods.command,
+                });
             }
         }
     }
@@ -708,9 +840,19 @@ pub fn scene_canvas_ui(
                         p,
                     ));
                 }
-                Drag::Resize { index, handle, orig } => {
+                Drag::Resize {
+                    index,
+                    handle,
+                    orig,
+                } => {
                     if let Some(n) = scene.nodes.get(index).cloned() {
-                        let base = SceneNode { x: orig.0, y: orig.1, width: orig.2, height: orig.3, ..n };
+                        let base = SceneNode {
+                            x: orig.0,
+                            y: orig.1,
+                            width: orig.2,
+                            height: orig.3,
+                            ..n
+                        };
                         let (lx, ly) = to_local(&base, wx, wy);
                         let (hx, hy) = HANDLES[handle as usize];
                         let min = if snap { scene.grid } else { 4.0 };
@@ -738,8 +880,16 @@ pub fn scene_canvas_ui(
         }
     }
     if let Some(r) = marquee_rect {
-        painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(0x4F, 0x9D, 0xE8, 40));
-        painter.rect_stroke(r, Rounding::ZERO, Stroke::new(1.0_f32, Color32::from_rgb(0x4F, 0x9D, 0xE8)));
+        painter.rect_filled(
+            r,
+            0.0,
+            Color32::from_rgba_unmultiplied(0x4F, 0x9D, 0xE8, 40),
+        );
+        painter.rect_stroke(
+            r,
+            Rounding::ZERO,
+            Stroke::new(1.0_f32, Color32::from_rgb(0x4F, 0x9D, 0xE8)),
+        );
     }
     if resp.drag_stopped() {
         if let (Some(Drag::Marquee { start, additive }), Some(p)) = (scene.drag.clone(), ptr) {
@@ -802,7 +952,11 @@ pub fn scene_keys(ctx: &egui::Context, scene: &mut SceneEditor) {
     let ctrl = egui::Modifiers::COMMAND;
     let shift = egui::Modifiers::SHIFT;
     let consume = |m: egui::Modifiers, k: egui::Key| ctx.input_mut(|i| i.consume_key(m, k));
-    if consume(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z) || consume(ctrl, egui::Key::Y) {
+    if consume(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    ) || consume(ctrl, egui::Key::Y)
+    {
         scene.redo();
     } else if consume(ctrl, egui::Key::Z) {
         scene.undo();
@@ -944,7 +1098,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    fn press(ctx: &egui::Context, scene: &mut SceneEditor, key: egui::Key, modifiers: egui::Modifiers) {
+    fn press(
+        ctx: &egui::Context,
+        scene: &mut SceneEditor,
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+    ) {
         let mut input = egui::RawInput::default();
         input.modifiers = modifiers;
         input.events.push(egui::Event::Key {
@@ -964,7 +1123,12 @@ mod tests {
         scene.add_node_kind("ColorRect");
         let (x0, y0) = (scene.nodes[0].x, scene.nodes[0].y);
 
-        press(&ctx, &mut scene, egui::Key::ArrowRight, egui::Modifiers::NONE);
+        press(
+            &ctx,
+            &mut scene,
+            egui::Key::ArrowRight,
+            egui::Modifiers::NONE,
+        );
         assert_eq!(scene.nodes[0].x, x0 + 1.0);
         press(&ctx, &mut scene, egui::Key::ArrowUp, egui::Modifiers::SHIFT);
         assert_eq!(scene.nodes[0].y, y0 + 10.0);
@@ -1003,7 +1167,10 @@ mod tests {
             locked: false,
         };
         let (hx, hy) = handle_pos(&n, 3);
-        assert!((hx - 100.0).abs() < 0.01 && (hy - 90.0).abs() < 0.01, "{hx} {hy}");
+        assert!(
+            (hx - 100.0).abs() < 0.01 && (hy - 90.0).abs() < 0.01,
+            "{hx} {hy}"
+        );
         let mut scene = SceneEditor::default();
         scene.nodes.push(n.clone());
         assert_eq!(node_at(&scene, 100.0, 85.0), Some(0));

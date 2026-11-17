@@ -25,25 +25,73 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("Ctrl+1", "Режим «Скрипт»", "Script mode"),
     ("Ctrl+2", "Режим «Редактор сцен»", "Scene editor mode"),
     ("", "Код", "Code"),
-    ("Ctrl+/", "Закомментировать или раскомментировать строки", "Toggle line comment"),
+    (
+        "Ctrl+/",
+        "Закомментировать или раскомментировать строки",
+        "Toggle line comment",
+    ),
     ("Ctrl+Z / Ctrl+Y", "Отменить / вернуть", "Undo / redo"),
     ("", "Редактор сцен", "Scene editor"),
     ("Ctrl+A", "Выделить всё", "Select all"),
-    ("Shift+клик", "Добавить узел к выделению", "Add node to selection"),
-    ("Ctrl+C / Ctrl+V", "Копировать / вставить узлы", "Copy / paste nodes"),
+    (
+        "Shift+клик",
+        "Добавить узел к выделению",
+        "Add node to selection",
+    ),
+    (
+        "Ctrl+C / Ctrl+V",
+        "Копировать / вставить узлы",
+        "Copy / paste nodes",
+    ),
     ("Ctrl+D", "Дублировать", "Duplicate"),
     ("Delete", "Удалить узлы", "Delete nodes"),
-    ("Стрелки", "Сдвинуть на 1 (Shift — на 10)", "Nudge by 1 (Shift: 10)"),
-    ("F / Home", "Показать выделенное / весь кадр", "Focus selection / fit frame"),
+    (
+        "Стрелки",
+        "Сдвинуть на 1 (Shift — на 10)",
+        "Nudge by 1 (Shift: 10)",
+    ),
+    (
+        "F / Home",
+        "Показать выделенное / весь кадр",
+        "Focus selection / fit frame",
+    ),
     ("Esc", "Снять выделение", "Clear selection"),
-    ("Alt при перетаскивании", "Без привязки к сетке", "Disable snapping"),
-    ("Пробел+мышь", "Перемещать холст (или средняя кнопка)", "Pan the canvas (or middle button)"),
+    (
+        "Alt при перетаскивании",
+        "Без привязки к сетке",
+        "Disable snapping",
+    ),
+    (
+        "Пробел+мышь",
+        "Перемещать холст (или средняя кнопка)",
+        "Pan the canvas (or middle button)",
+    ),
     ("", "Перетаскивание", "Drag and drop"),
-    ("Файлы из ОС", "В окно проекта: копируются в assets", "Into a project window: copied to assets"),
-    ("Папка проекта", "В главное меню: открывает проект", "Into the main menu: opens the project"),
-    (".lang / .theme", "В главное меню: ставятся в IC-data", "Into the main menu: installed into IC-data"),
-    ("Файлы в проводнике", "Перенос в другую папку", "Move to another folder"),
-    ("Строки дерева сцены", "Меняют порядок слоёв", "Change the layer order"),
+    (
+        "Файлы из ОС",
+        "В окно проекта: копируются в assets",
+        "Into a project window: copied to assets",
+    ),
+    (
+        "Папка проекта",
+        "В главное меню: открывает проект",
+        "Into the main menu: opens the project",
+    ),
+    (
+        ".lang / .theme",
+        "В главное меню: ставятся в IC-data",
+        "Into the main menu: installed into IC-data",
+    ),
+    (
+        "Файлы в проводнике",
+        "Перенос в другую папку",
+        "Move to another folder",
+    ),
+    (
+        "Строки дерева сцены",
+        "Меняют порядок слоёв",
+        "Change the layer order",
+    ),
 ];
 
 // Тексты для файлов перевода (английские строки из таблицы)
@@ -67,12 +115,25 @@ pub fn show(ctx: &egui::Context, open: &mut bool, lang: Lang) {
                                 ui.label("");
                                 ui.label("");
                                 ui.end_row();
-                                ui.label(RichText::new(i18n::custom_text(en).unwrap_or(if lang == Lang::Ru { ru } else { en })).strong());
+                                ui.label(
+                                    RichText::new(
+                                        i18n::custom_text(en).unwrap_or(if lang == Lang::Ru {
+                                            ru
+                                        } else {
+                                            en
+                                        }),
+                                    )
+                                    .strong(),
+                                );
                                 ui.label("");
                                 ui.end_row();
                             } else {
                                 ui.label(RichText::new(*keys).monospace());
-                                ui.label(i18n::custom_text(en).unwrap_or(if lang == Lang::Ru { ru } else { en }));
+                                ui.label(i18n::custom_text(en).unwrap_or(if lang == Lang::Ru {
+                                    ru
+                                } else {
+                                    en
+                                }));
                                 ui.end_row();
                             }
                         }

@@ -318,9 +318,17 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
 
     // Компиляция Lua в байт-код; --source оставляет исходники в игре
     if !KEEP_SOURCE.load(std::sync::atomic::Ordering::Relaxed) {
-        let before: usize = entries.iter().filter(|(p, _)| p.ends_with(".lua")).map(|(_, d)| d.len()).sum();
+        let before: usize = entries
+            .iter()
+            .filter(|(p, _)| p.ends_with(".lua"))
+            .map(|(_, d)| d.len())
+            .sum();
         entries = or_die(ic_lua::compile_bytecode(&entries));
-        let after: usize = entries.iter().filter(|(p, _)| p.ends_with(".lua")).map(|(_, d)| d.len()).sum();
+        let after: usize = entries
+            .iter()
+            .filter(|(p, _)| p.ends_with(".lua"))
+            .map(|(_, d)| d.len())
+            .sum();
         println!(
             "      байт-код Lua 5.4: {:.1} КБ вместо {:.1} КБ исходников",
             after as f64 / 1024.0,

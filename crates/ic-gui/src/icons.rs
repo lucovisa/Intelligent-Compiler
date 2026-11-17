@@ -62,9 +62,14 @@ impl IconSet {
         }
         let loaded = self.png.get(key).and_then(|(o, l)| {
             let image = decode_png(std::io::Cursor::new(&PAK[*o..*o + *l]))?;
-            Some(self.ctx.load_texture(format!("icon-{key}"), image, egui::TextureOptions::LINEAR))
+            Some(
+                self.ctx
+                    .load_texture(format!("icon-{key}"), image, egui::TextureOptions::LINEAR),
+            )
         });
-        self.cache.borrow_mut().insert(key.to_string(), loaded.clone());
+        self.cache
+            .borrow_mut()
+            .insert(key.to_string(), loaded.clone());
         loaded
     }
 
@@ -104,9 +109,24 @@ impl IconSet {
         self.draw(painter, rect, self.file_key(name), dark);
     }
 
-    pub fn paint_folder(&self, painter: &egui::Painter, rect: egui::Rect, name: &str, open: bool, dark: bool) {
-        let base = self.dir.get(name.to_ascii_lowercase().as_str()).copied().unwrap_or("folder-base");
-        let key = if open { format!("{base}-open") } else { base.to_string() };
+    pub fn paint_folder(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        name: &str,
+        open: bool,
+        dark: bool,
+    ) {
+        let base = self
+            .dir
+            .get(name.to_ascii_lowercase().as_str())
+            .copied()
+            .unwrap_or("folder-base");
+        let key = if open {
+            format!("{base}-open")
+        } else {
+            base.to_string()
+        };
         if self.png.contains_key(key.as_str()) {
             self.draw(painter, rect, &key, dark);
         } else {
@@ -115,7 +135,16 @@ impl IconSet {
     }
 
     pub fn paint_root(&self, painter: &egui::Painter, rect: egui::Rect, open: bool, dark: bool) {
-        self.draw(painter, rect, if open { "folder-root-open" } else { "folder-root" }, dark);
+        self.draw(
+            painter,
+            rect,
+            if open {
+                "folder-root-open"
+            } else {
+                "folder-root"
+            },
+            dark,
+        );
     }
 }
 
@@ -133,7 +162,10 @@ pub fn tool_button(ui: &mut egui::Ui, set: &IconSet, tool: Tool, tip: &str) -> e
         ui.painter()
             .rect_filled(rect, 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
     }
-    let icon = egui::Rect::from_center_size(rect.center() + egui::vec2(-2.0, 0.0), egui::vec2(16.0, 16.0));
+    let icon = egui::Rect::from_center_size(
+        rect.center() + egui::vec2(-2.0, 0.0),
+        egui::vec2(16.0, 16.0),
+    );
     let dark = ui.visuals().dark_mode;
     let painter = ui.painter();
     match tool {
@@ -143,14 +175,26 @@ pub fn tool_button(ui: &mut egui::Ui, set: &IconSet, tool: Tool, tip: &str) -> e
     }
     let plus = rect.right_bottom() + egui::vec2(-5.0, -5.0);
     let color = ui.visuals().text_color();
-    painter.line_segment([plus + egui::vec2(-3.0, 0.0), plus + egui::vec2(3.0, 0.0)], Stroke::new(1.5_f32, color));
-    painter.line_segment([plus + egui::vec2(0.0, -3.0), plus + egui::vec2(0.0, 3.0)], Stroke::new(1.5_f32, color));
+    painter.line_segment(
+        [plus + egui::vec2(-3.0, 0.0), plus + egui::vec2(3.0, 0.0)],
+        Stroke::new(1.5_f32, color),
+    );
+    painter.line_segment(
+        [plus + egui::vec2(0.0, -3.0), plus + egui::vec2(0.0, 3.0)],
+        Stroke::new(1.5_f32, color),
+    );
     resp.on_hover_text(tip)
 }
 
 // Название языка для строки состояния
 pub fn language_name(name: &str) -> &'static str {
-    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+    match name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "lua" => "Lua",
         "cpp" | "cc" | "cxx" | "hpp" | "hh" => "C++",
         "c" | "h" => "C",
@@ -165,4 +209,3 @@ pub fn language_name(name: &str) -> &'static str {
         _ => "Text",
     }
 }
-

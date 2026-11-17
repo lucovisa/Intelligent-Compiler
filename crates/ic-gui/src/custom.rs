@@ -90,12 +90,15 @@ pub fn parse_theme(text: &str, id: &str) -> Result<Theme, String> {
             "border" => &mut theme.border,
             "accent" => &mut theme.accent,
             "text" => {
-                theme.text = Some(color(v).ok_or_else(|| format!("{id}: строка {line}: цвет должен быть вида #RRGGBB"))?);
+                theme.text = Some(color(v).ok_or_else(|| {
+                    format!("{id}: строка {line}: цвет должен быть вида #RRGGBB")
+                })?);
                 continue;
             }
             _ => continue,
         };
-        *slot = color(v).ok_or_else(|| format!("{id}: строка {line}: цвет должен быть вида #RRGGBB"))?;
+        *slot = color(v)
+            .ok_or_else(|| format!("{id}: строка {line}: цвет должен быть вида #RRGGBB"))?;
     }
     if theme.name.is_empty() {
         return Err(format!("{id}: нет поля name"));
@@ -116,7 +119,10 @@ pub fn load_themes(dir: &Path) -> (Vec<Theme>, Vec<String>) {
         .collect();
     files.sort();
     for path in files {
-        let id = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let id = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         match fs::read_to_string(&path) {
             Ok(text) => match parse_theme(&text, &id) {
                 Ok(t) => themes.push(t),
@@ -159,7 +165,11 @@ mod tests {
 
     #[test]
     fn parses_theme_with_overrides() {
-        let t = parse_theme("name = \"Sol\"\nbase = \"light\"\naccent = \"#268bd2\"\ntext = \"#111111\"\n", "sol").unwrap();
+        let t = parse_theme(
+            "name = \"Sol\"\nbase = \"light\"\naccent = \"#268bd2\"\ntext = \"#111111\"\n",
+            "sol",
+        )
+        .unwrap();
         assert!(!t.dark);
         assert_eq!(t.accent, [0x26, 0x8b, 0xd2]);
         assert_eq!(t.text, Some([0x11, 0x11, 0x11]));

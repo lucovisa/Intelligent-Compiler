@@ -894,7 +894,9 @@ pub struct UiLang {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 // Строка в кавычках с экранированием; возвращает значение и остаток
@@ -916,7 +918,8 @@ fn parse_quoted(s: &str) -> Option<(String, &str)> {
 }
 
 pub fn is_ui_lang_text(text: &str) -> bool {
-    text.lines().any(|l| l.trim_start().starts_with("interface"))
+    text.lines()
+        .any(|l| l.trim_start().starts_with("interface"))
 }
 
 pub fn parse_ui_lang(text: &str, id: &str) -> Result<UiLang, String> {
@@ -932,7 +935,8 @@ pub fn parse_ui_lang(text: &str, id: &str) -> Result<UiLang, String> {
             continue;
         }
         let (key, after): (String, String) = if line.starts_with('"') {
-            let (k, r) = parse_quoted(line).ok_or_else(|| format!("{id}: строка {}: неверный ключ", n + 1))?;
+            let (k, r) = parse_quoted(line)
+                .ok_or_else(|| format!("{id}: строка {}: неверный ключ", n + 1))?;
             (k, r.to_string())
         } else {
             let (k, r) = line
@@ -960,7 +964,10 @@ pub fn parse_ui_lang(text: &str, id: &str) -> Result<UiLang, String> {
 
 pub fn build_custom(l: &UiLang) -> Custom {
     let names: HashMap<String, K> = K::ALL.iter().map(|k| (format!("{k:?}"), *k)).collect();
-    let mut c = Custom { by_k: HashMap::new(), by_text: HashMap::new() };
+    let mut c = Custom {
+        by_k: HashMap::new(),
+        by_text: HashMap::new(),
+    };
     for (key, value) in &l.strings {
         let value: &'static str = Box::leak(value.clone().into_boxed_str());
         if let Some(k) = names.get(key) {

@@ -2,7 +2,13 @@
 
 // Префикс комментария по имени файла
 pub fn comment_prefix(file_name: &str) -> &'static str {
-    match file_name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+    match file_name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "lua" | "sql" => "-- ",
         "py" | "sh" | "toml" | "yml" | "yaml" | "lang" | "theme" | "ps1" => "# ",
         _ => "// ",
@@ -10,15 +16,27 @@ pub fn comment_prefix(file_name: &str) -> &'static str {
 }
 
 // Возвращает новый текст и новое выделение (все затронутые строки)
-pub fn toggle_comment(text: &str, start: usize, end: usize, prefix: &str) -> (String, usize, usize) {
+pub fn toggle_comment(
+    text: &str,
+    start: usize,
+    end: usize,
+    prefix: &str,
+) -> (String, usize, usize) {
     let chars: Vec<char> = text.chars().collect();
-    let (lo, hi) = (start.min(end).min(chars.len()), start.max(end).min(chars.len()));
+    let (lo, hi) = (
+        start.min(end).min(chars.len()),
+        start.max(end).min(chars.len()),
+    );
     let mut first = lo;
     while first > 0 && chars[first - 1] != '\n' {
         first -= 1;
     }
     // Выделение, заканчивающееся в начале строки, следующую строку не затрагивает
-    let mut last = if hi > lo && chars.get(hi - 1) == Some(&'\n') { hi - 1 } else { hi };
+    let mut last = if hi > lo && chars.get(hi - 1) == Some(&'\n') {
+        hi - 1
+    } else {
+        hi
+    };
     while last < chars.len() && chars[last] != '\n' {
         last += 1;
     }
