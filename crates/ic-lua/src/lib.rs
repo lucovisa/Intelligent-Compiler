@@ -171,6 +171,26 @@ pub fn check_sources(files: &[(String, Vec<u8>)]) -> Vec<Diagnostic> {
     out
 }
 
+// Компиляция Lua в байт-код (Lua 5.4): в игру попадает уже скомпилированный код, без исходников
+pub fn compile_bytecode(files: &[(String, Vec<u8>)]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let lua = Lua::new();
+    let mut out = Vec::with_capacity(files.len());
+    for (path, data) in files {
+        if !path.ends_with(".lua") {
+            out.push((path.clone(), data.clone()));
+            continue;
+        }
+        let function = lua
+            .load(data.as_slice())
+            .set_name(format!("@{path}"))
+            .into_function()
+            .map_err(|e| e.to_string())?;
+        // Отладочные данные оставляем: номера строк в ошибках не пропадают
+        out.push((path.clone(), function.dump(false)));
+    }
+    Ok(out)
+}
+
 fn api_warnings(path: &str, src: &str) -> Vec<Diagnostic> {
     let b = src.as_bytes();
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
@@ -469,5 +489,27 @@ mod check_tests {
     #[test]
     fn user_defined_ic_function_is_fine() {
         assert!(one("function ic.helper() end\nic.helper()").is_empty());
+    }
+
+    #[test]
+    fn bytecode_runs_and_keeps_line_numbers() {
+        let src = vec![(
+            "main.lua".to_string(),
+            b"function ic.load() end\nfunction ic.update(dt)\n    local x = nil\n    return x.field\nend\n".to_vec(),
+        )];
+        let compiled = compile_bytecode(&src).unwrap();
+        assert!(compiled[0].1.starts_with(b"\x1bLua"));
+        let mut files = HashMap::new();
+        files.insert("main.lua".to_string(), compiled[0].1.clone());
+        let game = LuaGame::from_files(files);
+        assert!(game.is_ok(), "{:?}", game.err());
+    }
+
+    #[test]
+    fn bytecode_keeps_non_lua_files_and_reports_syntax_errors() {
+        let ok = compile_bytecode(&[("a.txt".to_string(), b"hello".to_vec())]).unwrap();
+        assert_eq!(ok[0].1, b"hello");
+        let err = compile_bytecode(&[("b.lua".to_string(), b"local = =".to_vec())]);
+        assert!(err.is_err());
     }
 }

@@ -1,63 +1,80 @@
 use super::*;
+use std::cell::RefCell;
 
-// Значки из Material Icon Theme (MIT), растр 36×36 для чёткости на любом экране
-const ASSETS: &[(&str, &[u8])] = &[
-    ("lua", include_bytes!("../assets/icons/lua.png")),
-    ("cpp", include_bytes!("../assets/icons/cpp.png")),
-    ("c", include_bytes!("../assets/icons/c.png")),
-    ("h", include_bytes!("../assets/icons/h.png")),
-    ("hpp", include_bytes!("../assets/icons/hpp.png")),
-    ("csharp", include_bytes!("../assets/icons/csharp.png")),
-    ("rust", include_bytes!("../assets/icons/rust.png")),
-    ("zig", include_bytes!("../assets/icons/zig.png")),
-    ("json", include_bytes!("../assets/icons/json.png")),
-    ("toml", include_bytes!("../assets/icons/toml.png")),
-    ("markdown", include_bytes!("../assets/icons/markdown.png")),
-    ("image", include_bytes!("../assets/icons/image.png")),
-    ("audio", include_bytes!("../assets/icons/audio.png")),
-    ("document", include_bytes!("../assets/icons/document.png")),
-    (
-        "javascript",
-        include_bytes!("../assets/icons/javascript.png"),
-    ),
-    ("python", include_bytes!("../assets/icons/python.png")),
-    ("console", include_bytes!("../assets/icons/console.png")),
-    ("settings", include_bytes!("../assets/icons/settings.png")),
-    ("shader", include_bytes!("../assets/icons/shader.png")),
-    ("yaml", include_bytes!("../assets/icons/yaml.png")),
-    ("xml", include_bytes!("../assets/icons/xml.png")),
-    (
-        "folder-base",
-        include_bytes!("../assets/icons/folder-base.png"),
-    ),
-    (
-        "folder-open",
-        include_bytes!("../assets/icons/folder-open.png"),
-    ),
-    ("scene", include_bytes!("../assets/icons/scene.png")),
-];
+// Значки Material Icon Theme (MIT), растр 36×36; таблица соответствий — из того же набора
+const PAK: &[u8] = include_bytes!("../assets/icons/icons.pak");
+const MAP: &str = include_str!("../assets/icons/icon_map.txt");
 
-#[derive(Default)]
 pub struct IconSet {
-    tex: HashMap<&'static str, egui::TextureHandle>,
+    ctx: egui::Context,
+    png: HashMap<&'static str, (usize, usize)>,
+    ext: HashMap<&'static str, &'static str>,
+    file: HashMap<&'static str, &'static str>,
+    dir: HashMap<&'static str, &'static str>,
+    light: HashSet<&'static str>,
+    cache: RefCell<HashMap<String, Option<egui::TextureHandle>>>,
 }
 
 impl IconSet {
     pub fn new(ctx: &egui::Context) -> Self {
-        let mut tex = HashMap::new();
-        for (name, bytes) in ASSETS {
-            if let Some(image) = decode_png(std::io::Cursor::new(*bytes)) {
-                tex.insert(
-                    *name,
-                    ctx.load_texture(format!("icon-{name}"), image, egui::TextureOptions::LINEAR),
-                );
+        let mut set = Self {
+            ctx: ctx.clone(),
+            png: HashMap::new(),
+            ext: HashMap::new(),
+            file: HashMap::new(),
+            dir: HashMap::new(),
+            light: HashSet::new(),
+            cache: RefCell::new(HashMap::new()),
+        };
+        for line in MAP.lines() {
+            let mut p = line.split(' ');
+            match (p.next(), p.next(), p.next(), p.next()) {
+                (Some("png"), Some(n), Some(o), Some(l)) => {
+                    if let (Ok(o), Ok(l)) = (o.parse(), l.parse()) {
+                        set.png.insert(n, (o, l));
+                    }
+                }
+                (Some("ext"), Some(k), Some(v), _) => {
+                    set.ext.entry(k).or_insert(v);
+                }
+                (Some("file"), Some(k), Some(v), _) => {
+                    set.file.entry(k).or_insert(v);
+                }
+                (Some("dir"), Some(k), Some(v), _) => {
+                    set.dir.entry(k).or_insert(v);
+                }
+                (Some("light"), Some(n), _, _) => {
+                    set.light.insert(n);
+                }
+                _ => {}
             }
         }
-        Self { tex }
+        set
     }
 
-    fn draw(&self, painter: &egui::Painter, rect: egui::Rect, key: &str) {
-        if let Some(t) = self.tex.get(key) {
+    pub fn has_ext(&self, ext: &str) -> bool {
+        self.ext.contains_key(ext)
+    }
+
+    fn texture(&self, key: &str) -> Option<egui::TextureHandle> {
+        if let Some(t) = self.cache.borrow().get(key) {
+            return t.clone();
+        }
+        let loaded = self.png.get(key).and_then(|(o, l)| {
+            let image = decode_png(std::io::Cursor::new(&PAK[*o..*o + *l]))?;
+            Some(self.ctx.load_texture(format!("icon-{key}"), image, egui::TextureOptions::LINEAR))
+        });
+        self.cache.borrow_mut().insert(key.to_string(), loaded.clone());
+        loaded
+    }
+
+    fn draw(&self, painter: &egui::Painter, rect: egui::Rect, key: &str, dark: bool) {
+        let name = if !dark && self.light.contains(key) {
+            format!("{key}_light")
+        } else {
+            key.to_string()
+        };
+        if let Some(t) = self.texture(&name) {
             painter.image(
                 t.id(),
                 rect,
@@ -67,50 +84,38 @@ impl IconSet {
         }
     }
 
-    pub fn paint_file(&self, painter: &egui::Painter, rect: egui::Rect, name: &str) {
-        self.draw(painter, rect, asset_key(name));
+    // Имя файла → значок: сначала точное имя, потом самое длинное расширение
+    fn file_key(&self, name: &str) -> &'static str {
+        let lower = name.to_ascii_lowercase();
+        if let Some(k) = self.file.get(lower.as_str()) {
+            return k;
+        }
+        for (i, c) in lower.char_indices() {
+            if c == '.' && i + 1 < lower.len() {
+                if let Some(k) = self.ext.get(&lower[i + 1..]) {
+                    return k;
+                }
+            }
+        }
+        "document"
     }
 
-    pub fn paint_folder(&self, painter: &egui::Painter, rect: egui::Rect, open: bool) {
-        self.draw(
-            painter,
-            rect,
-            if open { "folder-open" } else { "folder-base" },
-        );
+    pub fn paint_file(&self, painter: &egui::Painter, rect: egui::Rect, name: &str, dark: bool) {
+        self.draw(painter, rect, self.file_key(name), dark);
     }
-}
 
-// Имя файла → значок
-fn asset_key(name: &str) -> &'static str {
-    match name
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "lua" => "lua",
-        "cpp" | "cc" | "cxx" => "cpp",
-        "c" => "c",
-        "h" => "h",
-        "hpp" | "hh" => "hpp",
-        "cs" => "csharp",
-        "rs" => "rust",
-        "zig" => "zig",
-        "json" => "json",
-        "toml" => "toml",
-        "md" | "mdx" => "markdown",
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg" => "image",
-        "wav" | "ogg" | "mp3" | "flac" => "audio",
-        "js" | "mjs" => "javascript",
-        "py" => "python",
-        "sh" | "bat" | "cmd" | "ps1" => "console",
-        "lang" | "theme" => "settings",
-        "wgsl" | "glsl" | "vert" | "frag" => "shader",
-        "yml" | "yaml" => "yaml",
-        "xml" | "html" | "htm" => "xml",
-        "ic-scene" => "scene",
-        _ => "document",
+    pub fn paint_folder(&self, painter: &egui::Painter, rect: egui::Rect, name: &str, open: bool, dark: bool) {
+        let base = self.dir.get(name.to_ascii_lowercase().as_str()).copied().unwrap_or("folder-base");
+        let key = if open { format!("{base}-open") } else { base.to_string() };
+        if self.png.contains_key(key.as_str()) {
+            self.draw(painter, rect, &key, dark);
+        } else {
+            self.draw(painter, rect, base, dark);
+        }
+    }
+
+    pub fn paint_root(&self, painter: &egui::Painter, rect: egui::Rect, open: bool, dark: bool) {
+        self.draw(painter, rect, if open { "folder-root-open" } else { "folder-root" }, dark);
     }
 }
 
@@ -128,39 +133,24 @@ pub fn tool_button(ui: &mut egui::Ui, set: &IconSet, tool: Tool, tip: &str) -> e
         ui.painter()
             .rect_filled(rect, 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
     }
-    let icon = egui::Rect::from_center_size(
-        rect.center() + egui::vec2(-2.0, 0.0),
-        egui::vec2(16.0, 16.0),
-    );
+    let icon = egui::Rect::from_center_size(rect.center() + egui::vec2(-2.0, 0.0), egui::vec2(16.0, 16.0));
+    let dark = ui.visuals().dark_mode;
     let painter = ui.painter();
     match tool {
-        Tool::NewFile => set.paint_file(painter, icon, "a.txt"),
-        Tool::NewFolder => set.paint_folder(painter, icon, false),
-        Tool::NewScene => set.paint_file(painter, icon, "a.ic-scene"),
+        Tool::NewFile => set.paint_file(painter, icon, "a.txt", dark),
+        Tool::NewFolder => set.paint_folder(painter, icon, "", false, dark),
+        Tool::NewScene => set.paint_file(painter, icon, "a.ic-scene", dark),
     }
-    // Плюс в правом нижнем углу
     let plus = rect.right_bottom() + egui::vec2(-5.0, -5.0);
     let color = ui.visuals().text_color();
-    painter.line_segment(
-        [plus + egui::vec2(-3.0, 0.0), plus + egui::vec2(3.0, 0.0)],
-        Stroke::new(1.5_f32, color),
-    );
-    painter.line_segment(
-        [plus + egui::vec2(0.0, -3.0), plus + egui::vec2(0.0, 3.0)],
-        Stroke::new(1.5_f32, color),
-    );
+    painter.line_segment([plus + egui::vec2(-3.0, 0.0), plus + egui::vec2(3.0, 0.0)], Stroke::new(1.5_f32, color));
+    painter.line_segment([plus + egui::vec2(0.0, -3.0), plus + egui::vec2(0.0, 3.0)], Stroke::new(1.5_f32, color));
     resp.on_hover_text(tip)
 }
 
 // Название языка для строки состояния
 pub fn language_name(name: &str) -> &'static str {
-    match name
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
         "lua" => "Lua",
         "cpp" | "cc" | "cxx" | "hpp" | "hh" => "C++",
         "c" | "h" => "C",
@@ -176,40 +166,3 @@ pub fn language_name(name: &str) -> &'static str {
     }
 }
 
-// Есть ли встроенный значок для расширения
-pub fn has_builtin_icon(ext: &str) -> bool {
-    matches!(
-        ext,
-        "lua"
-            | "toml"
-            | "json"
-            | "md"
-            | "cpp"
-            | "cc"
-            | "cxx"
-            | "hpp"
-            | "hh"
-            | "h"
-            | "c"
-            | "cs"
-            | "rs"
-            | "zig"
-            | "py"
-            | "js"
-            | "mjs"
-            | "png"
-            | "jpg"
-            | "jpeg"
-            | "gif"
-            | "webp"
-            | "bmp"
-            | "ico"
-            | "wav"
-            | "ogg"
-            | "mp3"
-            | "flac"
-            | "wgsl"
-            | "glsl"
-            | "ic-scene"
-    )
-}

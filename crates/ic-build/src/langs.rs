@@ -140,10 +140,7 @@ pub fn load_dir(dir: &Path) -> (Vec<Language>, Vec<String>) {
     for path in files {
         match fs::read_to_string(&path) {
             // Файлы перевода интерфейса (поле interface) — не языки программирования
-            Ok(text)
-                if text
-                    .lines()
-                    .any(|l| l.trim_start().starts_with("interface")) => {}
+            Ok(text) if text.lines().any(|l| l.trim_start().starts_with("interface")) => {}
             Ok(text) => match parse(&text, &path) {
                 Ok(l) => langs.push(l),
                 Err(e) => errors.push(e),

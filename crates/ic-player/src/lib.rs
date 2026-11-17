@@ -1,7 +1,7 @@
 use ic_build::ProjectSettings;
 use ic_lua::LuaGame;
 use ic_render::{run, Config};
-use std::{collections::HashMap, env, fs, path::Path};
+use std::{collections::HashMap, env};
 
 pub fn make_config(s: &ProjectSettings, lua_title: Option<String>) -> Config {
     let title: &'static str = Box::leak(

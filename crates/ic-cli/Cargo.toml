@@ -15,3 +15,6 @@ ic-gui = { path = "../ic-gui" }
 ic-lua = { path = "../ic-lua" }
 ic-player = { path = "../ic-player" }
 ic-render = { path = "../ic-render" }
+
+[build-dependencies]
+embed-resource = "3.0.12"

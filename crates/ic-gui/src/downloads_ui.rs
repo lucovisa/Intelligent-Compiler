@@ -14,6 +14,7 @@ pub struct DownloadState {
     pub update_msg: String,
     pub update_tag: Option<String>,
     pub cpp_msg: String,
+    pub drop_msg: String,
 }
 
 pub fn cpp_installed() -> bool {
@@ -24,6 +25,49 @@ pub fn cpp_installed() -> bool {
 }
 
 impl IcApp {
+    // Перетаскивание в главное меню: папка проекта или файлы .lang / .theme
+    pub(super) fn handle_menu_drop(&mut self, files: &[egui::DroppedFile]) {
+        let lang = self.settings.lang;
+        let Some(data) = ic_build::confine::data_dir() else {
+            return;
+        };
+        let mut messages = Vec::new();
+        for file in files {
+            let Some(path) = file.path.as_ref() else {
+                continue;
+            };
+            let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            if path.is_dir() {
+                if is_project_dir(path) {
+                    self.open_project(path.clone());
+                    return;
+                }
+                messages.push(format!(
+                    "{}: {}",
+                    path.display(),
+                    t2(lang, "это не проект (нужен main.lua или ic.toml)", "not a project (needs main.lua or ic.toml)")
+                ));
+            } else if ext == "lang" || ext == "theme" {
+                let folder = data.join(if ext == "lang" { "languages" } else { "themes" });
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let target = folder.join(&name);
+                match fs::create_dir_all(&folder).and_then(|()| fs::copy(path, &target)) {
+                    Ok(_) => messages.push(format!("{} {name}", t2(lang, "Установлено:", "Installed:"))),
+                    Err(e) => messages.push(format!("{name}: {e}")),
+                }
+            } else {
+                messages.push(format!(
+                    "{}: {}",
+                    path.display(),
+                    t2(lang, "в главное меню можно бросать папку проекта, .lang или .theme", "drop a project folder, .lang or .theme here")
+                ));
+            }
+        }
+        if !messages.is_empty() {
+            self.dl.drop_msg = messages.join("\n");
+            self.reload_custom();
+        }
+    }
     // Разбор результатов фоновых загрузок
     pub(super) fn dl_poll(&mut self) {
         let lang = self.settings.lang;
@@ -32,26 +76,15 @@ impl IcApp {
             match event {
                 DlEvent::Update(Ok(Some(tag))) => {
                     if downloads::is_newer(env!("CARGO_PKG_VERSION"), &tag) {
-                        self.dl.update_msg =
-                            format!("{} {tag}", t2(lang, "Доступна версия", "New version"));
+                        self.dl.update_msg = format!("{} {tag}", t2(lang, "Доступна версия", "New version"));
                         self.dl.update_tag = Some(tag);
                     } else {
-                        self.dl.update_msg = t2(
-                            lang,
-                            "Установлена последняя версия",
-                            "You have the latest version",
-                        )
-                        .into();
+                        self.dl.update_msg = t2(lang, "Установлена последняя версия", "You have the latest version").into();
                         self.dl.update_tag = None;
                     }
                 }
                 DlEvent::Update(Ok(None)) => {
-                    self.dl.update_msg = t2(
-                        lang,
-                        "Релизов на GitHub пока нет",
-                        "No releases on GitHub yet",
-                    )
-                    .into();
+                    self.dl.update_msg = t2(lang, "Релизов на GitHub пока нет", "No releases on GitHub yet").into();
                 }
                 DlEvent::Update(Err(e)) | DlEvent::Installed(Err(e)) => self.dl.update_msg = e,
                 DlEvent::Installed(Ok(tag)) => {
@@ -84,8 +117,7 @@ impl IcApp {
     }
 
     pub(super) fn dl_install_update(&mut self) {
-        let (Some(tag), Some(data)) = (self.dl.update_tag.clone(), ic_build::confine::data_dir())
-        else {
+        let (Some(tag), Some(data)) = (self.dl.update_tag.clone(), ic_build::confine::data_dir()) else {
             return;
         };
         if self.dl.busy {
@@ -145,11 +177,9 @@ pub fn downloads_ui(
     action: &mut Option<Action>,
 ) {
     ui.heading(t2(lang, "Загрузки", "Downloads"));
-    ui.label(RichText::new(t2(
-        lang,
-        "Обновления и дополнительные языки",
-        "Updates and extra languages",
-    )));
+    ui.label(
+        RichText::new(t2(lang, "Обновления и дополнительные языки", "Updates and extra languages")),
+    );
     ui.add_space(10.0);
     let style = ui.style().clone();
 
@@ -170,21 +200,21 @@ pub fn downloads_ui(
                     ui.spinner();
                     ui.label(RichText::new(t2(lang, "Подожди…", "Please wait…")));
                 } else if let Some(tag) = &dl.update_tag {
-                    if primary_button(ui, &format!("{} {tag}", t2(lang, "Установить", "Install")))
-                        .clicked()
-                    {
+                    if primary_button(ui, &format!("{} {tag}", t2(lang, "Установить", "Install"))).clicked() {
                         *action = Some(Action::InstallUpdate);
                     }
-                } else if button(ui, t2(lang, "Проверить обновления", "Check for updates"))
-                    .clicked()
-                {
+                } else if button(ui, t2(lang, "Проверить обновления", "Check for updates")).clicked() {
                     *action = Some(Action::CheckUpdate);
                 }
             });
             if !dl.update_msg.is_empty() {
                 ui.label(RichText::new(&dl.update_msg).small());
             }
-            ui.label(RichText::new(format!("github.com/{}/releases", downloads::REPO)).small());
+            ui.label(
+                RichText::new(format!("github.com/{}/releases", downloads::REPO))
+                    .small()
+                    ,
+            );
         });
 
     ui.add_space(10.0);
@@ -217,6 +247,9 @@ pub fn downloads_ui(
             }
             if !dl.cpp_msg.is_empty() {
                 ui.label(RichText::new(&dl.cpp_msg).small());
+            }
+            if !dl.drop_msg.is_empty() {
+                ui.label(RichText::new(&dl.drop_msg).small());
             }
             ui.add_space(4.0);
             ui.label(

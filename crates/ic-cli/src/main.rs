@@ -28,7 +28,7 @@ IC — игровой движок
         --no-default-code    не вставлять демо-код
         --rust               проект на Rust (режим Б)
   ic check [папка]           проверить Lua-код без запуска
-  ic build [папка] [-o файл] [--target windows|linux|macos]
+  ic build [папка] [-o файл] [--target windows|linux|macos] [--source]
                              проверить и собрать игру в один самостоятельный файл
   ic setup                   меню выбора режима
   ic rust setup              скачать Rust в ./.ic/ (режим Б)
@@ -248,6 +248,8 @@ fn resolve_runtime(target: &str) -> Result<(Runtime, &'static str), String> {
     }
 }
 
+static KEEP_SOURCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
     // Проект и явный путь вывода выбраны пользователем
     ic_build::confine::allow(dir);
@@ -314,6 +316,18 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
         return;
     }
 
+    // Компиляция Lua в байт-код; --source оставляет исходники в игре
+    if !KEEP_SOURCE.load(std::sync::atomic::Ordering::Relaxed) {
+        let before: usize = entries.iter().filter(|(p, _)| p.ends_with(".lua")).map(|(_, d)| d.len()).sum();
+        entries = or_die(ic_lua::compile_bytecode(&entries));
+        let after: usize = entries.iter().filter(|(p, _)| p.ends_with(".lua")).map(|(_, d)| d.len()).sum();
+        println!(
+            "      байт-код Lua 5.4: {:.1} КБ вместо {:.1} КБ исходников",
+            after as f64 / 1024.0,
+            before as f64 / 1024.0
+        );
+    }
+
     let name = fs::canonicalize(dir)
         .ok()
         .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
@@ -351,6 +365,7 @@ fn build_args(rest: &[&str]) {
         match *a {
             "-o" => out = it.next().map(|p| PathBuf::from(*p)),
             "--target" => target = it.next().map(|t| t.to_string()),
+            "--source" => KEEP_SOURCE.store(true, std::sync::atomic::Ordering::Relaxed),
             other => dir = PathBuf::from(other),
         }
     }

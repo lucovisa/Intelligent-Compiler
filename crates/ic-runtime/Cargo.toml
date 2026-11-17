@@ -7,3 +7,6 @@ license.workspace = true
 [dependencies]
 ic-build = { path = "../ic-build" }
 ic-player = { path = "../ic-player" }
+
+[build-dependencies]
+embed-resource = "3.0.12"

@@ -1,5 +1,7 @@
 mod custom;
 mod downloads_ui;
+mod editing;
+mod hotkeys;
 mod i18n;
 mod icons;
 mod scene_model;
@@ -242,10 +244,7 @@ impl Settings {
             Some(id) => format!("custom:{id}"),
             None => self.lang.code().to_string(),
         };
-        let mut out = format!(
-            "theme={theme}\nlang={lang}\nlang_explicit={}\n",
-            self.lang_explicit
-        );
+        let mut out = format!("theme={theme}\nlang={lang}\nlang_explicit={}\n", self.lang_explicit);
         for r in &self.recent {
             out.push_str(&format!("recent={r}\n"));
         }
@@ -301,14 +300,7 @@ fn palette(dark: bool) -> Palette {
     let mut v = palette_values(dark);
     if let Some(theme) = custom::active() {
         if theme.dark == dark {
-            v = [
-                theme.panel,
-                theme.editor,
-                theme.idle,
-                theme.hover,
-                theme.border,
-                theme.accent,
-            ];
+            v = [theme.panel, theme.editor, theme.idle, theme.hover, theme.border, theme.accent];
         }
     }
     let c = |a: [u8; 3]| Color32::from_rgb(a[0], a[1], a[2]);
@@ -740,14 +732,10 @@ fn decode_png<R: std::io::BufRead + std::io::Seek>(reader: R) -> Option<egui::Co
     let data = &buf[..info.buffer_size()];
     let rgba: Vec<u8> = match info.color_type {
         png::ColorType::Rgba => data.to_vec(),
-        png::ColorType::Rgb => data
-            .chunks(3)
-            .flat_map(|c| [c[0], c[1], c[2], 255])
-            .collect(),
-        png::ColorType::GrayscaleAlpha => data
-            .chunks(2)
-            .flat_map(|c| [c[0], c[0], c[0], c[1]])
-            .collect(),
+        png::ColorType::Rgb => data.chunks(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => {
+            data.chunks(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect()
+        }
         png::ColorType::Grayscale => data.iter().flat_map(|g| [*g, *g, *g, 255]).collect(),
         _ => return None,
     };
@@ -757,11 +745,7 @@ fn decode_png<R: std::io::BufRead + std::io::Seek>(reader: R) -> Option<egui::Co
 // PNG-значок языка
 fn load_png_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
     let image = decode_png(BufReader::new(fs::File::open(path).ok()?))?;
-    Some(ctx.load_texture(
-        path.display().to_string(),
-        image,
-        egui::TextureOptions::LINEAR,
-    ))
+    Some(ctx.load_texture(path.display().to_string(), image, egui::TextureOptions::LINEAR))
 }
 
 fn valid_name(s: &str) -> bool {
@@ -866,11 +850,10 @@ fn explorer_rows(
                 painter.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
             }
             // Значок: у папки, у файла и у своего языка
-            let icon_rect =
-                egui::Rect::from_min_size(egui::pos2(x + 18.0, cy - 9.0), egui::vec2(18.0, 18.0));
+            let icon_rect = egui::Rect::from_min_size(egui::pos2(x + 18.0, cy - 9.0), egui::vec2(18.0, 18.0));
             let ext = f.name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
             if f.is_dir {
-                icon_set.paint_folder(painter, icon_rect, !collapsed);
+                icon_set.paint_folder(painter, icon_rect, &f.name, !collapsed, dark);
             } else if let Some(custom) = langs.icons.get(&ext) {
                 if let Some(tex) = &custom.texture {
                     painter.image(
@@ -890,7 +873,7 @@ fn explorer_rows(
                     );
                 }
             } else {
-                icon_set.paint_file(painter, icon_rect, &f.name);
+                icon_set.paint_file(painter, icon_rect, &f.name, dark);
             }
             painter.text(
                 egui::pos2(x + 42.0, cy),
@@ -1107,6 +1090,9 @@ struct IcApp {
     quick_open: bool,
     quick_filter: String,
     command_palette: bool,
+    help_open: bool,
+    show_sidebar: bool,
+    show_log: bool,
     command_filter: String,
     project_search: bool,
     project_search_query: String,
@@ -1153,6 +1139,9 @@ impl IcApp {
             quick_open: false,
             quick_filter: String::new(),
             command_palette: false,
+            help_open: false,
+            show_sidebar: true,
+            show_log: true,
             command_filter: String::new(),
             project_search: false,
             project_search_query: String::new(),
@@ -1510,7 +1499,7 @@ impl IcApp {
         for l in &list {
             let texture = l.icon.as_ref().and_then(|p| load_png_texture(&self.ctx, p));
             for ext in &l.extensions {
-                if texture.is_none() && icons::has_builtin_icon(ext) {
+                if texture.is_none() && self.icon_set.has_ext(ext) {
                     continue;
                 }
                 icons.insert(
@@ -1551,10 +1540,7 @@ impl IcApp {
                 if !i18n::is_ui_lang_text(&text) {
                     continue;
                 }
-                let id = path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default();
+                let id = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                 match i18n::parse_ui_lang(&text, &id) {
                     Ok(l) => langs.push(l),
                     Err(e) => self.log.push(e),
@@ -1605,8 +1591,7 @@ impl IcApp {
             return;
         };
         if !project_path_is_safe(&proj.dir, &file) {
-            self.log
-                .push("run refused: file is outside the project".into());
+            self.log.push("run refused: file is outside the project".into());
             return;
         }
         let out_dir = proj.dir.join("build");
@@ -1967,6 +1952,12 @@ impl IcApp {
 impl eframe::App for IcApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.dl_poll();
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F1)) {
+            self.help_open = !self.help_open;
+        }
+        if self.help_open {
+            hotkeys::show(ctx, &mut self.help_open, self.settings.lang);
+        }
         if self.scene_editor.open {
             self.scene_editor.begin_frame();
         }
@@ -1974,7 +1965,31 @@ impl eframe::App for IcApp {
             self.log.push(line);
         }
         let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
-        if !dropped_files.is_empty() {
+        if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
+            let text = if self.project.is_some() {
+                t2(self.settings.lang, "Отпусти файлы, чтобы добавить в assets", "Drop files to add them to assets")
+            } else {
+                t2(
+                    self.settings.lang,
+                    "Отпусти папку проекта или файл .lang / .theme",
+                    "Drop a project folder or a .lang / .theme file",
+                )
+            };
+            let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop_overlay"));
+            let painter = ctx.layer_painter(layer);
+            let screen = ctx.screen_rect();
+            painter.rect_filled(screen, 0.0, Color32::from_black_alpha(150));
+            painter.text(
+                screen.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                FontId::proportional(22.0),
+                Color32::WHITE,
+            );
+        }
+        if !dropped_files.is_empty() && self.project.is_none() {
+            self.handle_menu_drop(&dropped_files);
+        } else if !dropped_files.is_empty() {
             if let Some(proj) = self.project.as_mut() {
                 let assets = proj.dir.join("assets");
                 if !assets.exists() {
@@ -2075,12 +2090,7 @@ impl eframe::App for IcApp {
             .as_ref()
             .and_then(|proj| proj.open.as_ref())
             .and_then(|file| file.file_name())
-            .and_then(|name| {
-                self.langs
-                    .list
-                    .iter()
-                    .find(|l| l.matches(&name.to_string_lossy()))
-            })
+            .and_then(|name| self.langs.list.iter().find(|l| l.matches(&name.to_string_lossy())))
             .filter(|l| l.compiler.is_some() && !l.build.is_empty())
             .map(|l| (l.id.clone(), l.name.clone()));
 
@@ -2119,11 +2129,8 @@ impl eframe::App for IcApp {
                             action = Some(Action::Build);
                         }
                         if let Some((id, name)) = &run_lang {
-                            if primary_button(
-                                ui,
-                                &format!("{}: {name}", t2(lang, "Запустить", "Run")),
-                            )
-                            .clicked()
+                            if primary_button(ui, &format!("{}: {name}", t2(lang, "Запустить", "Run")))
+                                .clicked()
                             {
                                 action = Some(Action::RunLang(id.clone()));
                             }
@@ -2131,6 +2138,9 @@ impl eframe::App for IcApp {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if button(ui, "?").on_hover_text("F1").clicked() {
+                            self.help_open = !self.help_open;
+                        }
                         if theme_toggle(
                             ui,
                             &mut self.settings.dark,
@@ -2274,6 +2284,21 @@ impl eframe::App for IcApp {
                     action = Some(Action::PromptOpen(PromptKind::NewFile, base));
                 }
             }
+            if ctx.input_mut(|i| i.consume_key(command, egui::Key::B)) {
+                self.show_sidebar = !self.show_sidebar;
+            }
+            if ctx.input_mut(|i| i.consume_key(command, egui::Key::J)) {
+                self.show_log = !self.show_log;
+            }
+            if ctx.input_mut(|i| i.consume_key(command, egui::Key::Num1)) {
+                action = Some(Action::CloseScene);
+            }
+            if ctx.input_mut(|i| i.consume_key(command, egui::Key::Num2)) {
+                action = Some(Action::OpenScene);
+            }
+            if ctx.input_mut(|i| i.consume_key(command, egui::Key::Comma)) {
+                action = Some(Action::OpenSettings);
+            }
             if ctx.input_mut(|i| i.consume_key(command, egui::Key::W)) {
                 if let Some(path) = self.project.as_ref().and_then(|p| p.open.clone()) {
                     action = Some(Action::CloseTab(path));
@@ -2311,7 +2336,7 @@ impl eframe::App for IcApp {
                         .fill(p.panel)
                         .inner_margin(Margin::symmetric(12.0, 8.0)),
                 )
-                .show(ctx, |ui| {
+                .show_animated(ctx, self.show_log, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(tr(lang, K::Log)).small());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2339,7 +2364,7 @@ impl eframe::App for IcApp {
                         .fill(p.panel)
                         .inner_margin(Margin::symmetric(0.0, 6.0)),
                 )
-                .show(ctx, |ui| {
+                .show_animated(ctx, self.show_sidebar, |ui| {
                     let Some(proj) = self.project.as_ref() else {
                         return;
                     };
@@ -2366,37 +2391,14 @@ impl eframe::App for IcApp {
                         ui.label(RichText::new(tr(lang, K::Explorer)).small().strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(6.0);
-                            if icons::tool_button(
-                                ui,
-                                &self.icon_set,
-                                icons::Tool::NewScene,
-                                tr(lang, K::GenScene),
-                            )
-                            .clicked()
-                            {
+                            if icons::tool_button(ui, &self.icon_set, icons::Tool::NewScene, tr(lang, K::GenScene)).clicked() {
                                 action = Some(Action::AddGenerator(Generator::Scene));
                             }
-                            if icons::tool_button(
-                                ui,
-                                &self.icon_set,
-                                icons::Tool::NewFolder,
-                                tr(lang, K::NewFolder),
-                            )
-                            .clicked()
-                            {
-                                action =
-                                    Some(Action::PromptOpen(PromptKind::NewFolder, base.clone()));
+                            if icons::tool_button(ui, &self.icon_set, icons::Tool::NewFolder, tr(lang, K::NewFolder)).clicked() {
+                                action = Some(Action::PromptOpen(PromptKind::NewFolder, base.clone()));
                             }
-                            if icons::tool_button(
-                                ui,
-                                &self.icon_set,
-                                icons::Tool::NewFile,
-                                tr(lang, K::NewFile),
-                            )
-                            .clicked()
-                            {
-                                action =
-                                    Some(Action::PromptOpen(PromptKind::NewFile, base.clone()));
+                            if icons::tool_button(ui, &self.icon_set, icons::Tool::NewFile, tr(lang, K::NewFile)).clicked() {
+                                action = Some(Action::PromptOpen(PromptKind::NewFile, base.clone()));
                             }
                         });
                     });
@@ -2404,9 +2406,8 @@ impl eframe::App for IcApp {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.add_space(10.0);
-                        let (r, _) =
-                            ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
-                        self.icon_set.paint_folder(ui.painter(), r, true);
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                        self.icon_set.paint_root(ui.painter(), r, true, dark);
                         ui.label(RichText::new(proj.name.to_uppercase()).strong().small());
                     });
                     egui::ScrollArea::vertical()
@@ -2469,10 +2470,12 @@ impl eframe::App for IcApp {
                         }
                     });
                     if self.scene_editor.open {
-                        let (save, generator) =
-                            scene_ui::scene_toolbar_ui(ui, &mut self.scene_editor, lang);
+                        let (save, generator, run) = scene_ui::scene_toolbar_ui(ui, &mut self.scene_editor, lang);
                         if save {
                             action = Some(Action::SaveScene);
+                        }
+                        if run {
+                            action = Some(Action::Run);
                         }
                         if let Some(g) = generator {
                             action = Some(Action::AddGenerator(g));
@@ -2553,6 +2556,8 @@ impl eframe::App for IcApp {
                                 });
                                 let resp = ui.add(
                                     egui::TextEdit::multiline(&mut proj.text)
+                                        // Стабильный id: иначе фокус теряется, когда над редактором появляется метка
+                                        .id(egui::Id::new(("code_editor", proj.open.clone())))
                                         .code_editor()
                                         .desired_width(f32::INFINITY)
                                         .frame(false)
@@ -2560,6 +2565,32 @@ impl eframe::App for IcApp {
                                 );
                                 if resp.changed() {
                                     proj.dirty = true;
+                                }
+                                // Ctrl+/: закомментировать строки
+                                if resp.has_focus()
+                                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Slash))
+                                {
+                                    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), resp.id) {
+                                        let range = state.cursor.char_range();
+                                        let (a, b) = range
+                                            .map(|r| (r.primary.index, r.secondary.index))
+                                            .unwrap_or((0, 0));
+                                        let name = proj
+                                            .open
+                                            .as_ref()
+                                            .and_then(|f| f.file_name())
+                                            .map(|n| n.to_string_lossy().into_owned())
+                                            .unwrap_or_default();
+                                        let (text, start, end) =
+                                            editing::toggle_comment(&proj.text, a, b, editing::comment_prefix(&name));
+                                        proj.text = text;
+                                        proj.dirty = true;
+                                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                                            egui::text::CCursor::new(start),
+                                            egui::text::CCursor::new(end),
+                                        )));
+                                        state.store(ui.ctx(), resp.id);
+                                    }
                                 }
                             });
                         });
@@ -2570,8 +2601,7 @@ impl eframe::App for IcApp {
                 !n.is_empty() && !n.contains(['/', '\\'])
             };
             let cpp_ready = downloads_ui::cpp_installed();
-            let exists =
-                name_ok && is_project_dir(&resolve_dir(&self.location).join(self.name.trim()));
+            let exists = name_ok && is_project_dir(&resolve_dir(&self.location).join(self.name.trim()));
             if self.location != self.found_for {
                 self.found = scan_projects(&resolve_dir(&self.location));
                 self.found_for = self.location.clone();
@@ -2591,117 +2621,108 @@ impl eframe::App for IcApp {
                             egui::vec2(ui.available_width().min(940.0), 0.0),
                             egui::Layout::left_to_right(egui::Align::Min),
                             |ui| {
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(480.0, 0.0),
-                                    egui::Layout::top_down(egui::Align::Min),
-                                    |ui| {
-                                        ui.heading(tr(lang, K::StartTitle));
-                                        ui.label(RichText::new(tr(lang, K::StartSub)));
-                                        ui.add_space(10.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(480.0, 0.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.heading(tr(lang, K::StartTitle));
+                                ui.label(RichText::new(tr(lang, K::StartSub)));
+                                ui.add_space(10.0);
 
-                                        ui.label(tr(lang, K::ProjectName));
-                                        let r = ui.add(
-                                            egui::TextEdit::singleline(&mut self.name)
-                                                .desired_width(f32::INFINITY),
-                                        );
-                                        if r.lost_focus()
-                                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                            && name_ok
-                                            && !exists
-                                        {
-                                            action = Some(Action::Create);
-                                        }
+                                ui.label(tr(lang, K::ProjectName));
+                                let r = ui.add(
+                                    egui::TextEdit::singleline(&mut self.name)
+                                        .desired_width(f32::INFINITY),
+                                );
+                                if r.lost_focus()
+                                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    && name_ok
+                                    && !exists
+                                {
+                                    action = Some(Action::Create);
+                                }
 
-                                        ui.label(tr(lang, K::Location));
-                                        ui.add(
-                                            egui::TextEdit::singleline(&mut self.location)
-                                                .desired_width(f32::INFINITY),
-                                        );
-                                        let full =
-                                            resolve_dir(&self.location).join(self.name.trim());
-                                        ui.label(
-                                            RichText::new(format!("→ {}", full.display())).small(),
-                                        );
+                                ui.label(tr(lang, K::Location));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.location)
+                                        .desired_width(f32::INFINITY),
+                                );
+                                let full = resolve_dir(&self.location).join(self.name.trim());
+                                ui.label(
+                                    RichText::new(format!("→ {}", full.display()))
+                                        .small()
+                                        ,
+                                );
 
-                                        if exists {
-                                            ui.colored_label(
-                                                Color32::from_rgb(0x4E, 0xC9, 0x7B),
-                                                tr(lang, K::FoundProject),
-                                            );
-                                        } else if name_ok {
-                                            ui.label(RichText::new(tr(lang, K::WillCreate)));
-                                        }
-                                        if let Some(err) = &self.start_error {
-                                            ui.colored_label(
-                                                Color32::from_rgb(0xF4, 0x47, 0x47),
-                                                err.as_str(),
-                                            );
-                                        }
+                                if exists {
+                                    ui.colored_label(
+                                        Color32::from_rgb(0x4E, 0xC9, 0x7B),
+                                        tr(lang, K::FoundProject),
+                                    );
+                                } else if name_ok {
+                                    ui.label(RichText::new(tr(lang, K::WillCreate)));
+                                }
+                                if let Some(err) = &self.start_error {
+                                    ui.colored_label(
+                                        Color32::from_rgb(0xF4, 0x47, 0x47),
+                                        err.as_str(),
+                                    );
+                                }
 
-                                        ui.add_space(6.0);
-                                        ui.horizontal(|ui| {
-                                            if primary_on(
-                                                ui,
-                                                name_ok && !exists,
-                                                tr(lang, K::Create),
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    if primary_on(ui, name_ok && !exists, tr(lang, K::Create))
+                                        .clicked()
+                                    {
+                                        action = Some(Action::Create);
+                                    }
+                                    if button_on(ui, exists, tr(lang, K::OpenExisting))
+                                        .on_disabled_hover_text(tr(lang, K::OpenHint))
+                                        .clicked()
+                                    {
+                                        action = Some(Action::OpenTyped);
+                                    }
+                                });
+
+                                if !exists {
+                                    ui.label(RichText::new(tr(lang, K::OpenHint)).small());
+                                }
+                                if !self.found.is_empty() {
+                                    ui.add_space(10.0);
+                                    ui.label(RichText::new(tr(lang, K::FoundList)).small());
+                                    for n in &self.found {
+                                        if ui
+                                            .selectable_label(
+                                                n.as_str() == self.name.trim(),
+                                                n.as_str(),
                                             )
                                             .clicked()
-                                            {
-                                                action = Some(Action::Create);
-                                            }
-                                            if button_on(ui, exists, tr(lang, K::OpenExisting))
-                                                .on_disabled_hover_text(tr(lang, K::OpenHint))
-                                                .clicked()
-                                            {
-                                                action = Some(Action::OpenTyped);
-                                            }
-                                        });
+                                        {
+                                            action = Some(Action::PickProject(n.clone()));
+                                        }
+                                    }
+                                }
 
-                                        if !exists {
-                                            ui.label(RichText::new(tr(lang, K::OpenHint)).small());
+                                if !self.settings.recent.is_empty() {
+                                    ui.add_space(14.0);
+                                    ui.label(RichText::new(tr(lang, K::Recent)).small());
+                                    for r in &self.settings.recent {
+                                        if ui.link(r.as_str()).clicked() {
+                                            action = Some(Action::OpenRecent(r.clone()));
                                         }
-                                        if !self.found.is_empty() {
-                                            ui.add_space(10.0);
-                                            ui.label(RichText::new(tr(lang, K::FoundList)).small());
-                                            for n in &self.found {
-                                                if ui
-                                                    .selectable_label(
-                                                        n.as_str() == self.name.trim(),
-                                                        n.as_str(),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    action = Some(Action::PickProject(n.clone()));
-                                                }
-                                            }
-                                        }
-
-                                        if !self.settings.recent.is_empty() {
-                                            ui.add_space(14.0);
-                                            ui.label(RichText::new(tr(lang, K::Recent)).small());
-                                            for r in &self.settings.recent {
-                                                if ui.link(r.as_str()).clicked() {
-                                                    action = Some(Action::OpenRecent(r.clone()));
-                                                }
-                                            }
-                                        }
-                                    },
-                                );
-                                ui.add_space(36.0);
-                                // Загрузки: обновление и языки
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(420.0, 0.0),
-                                    egui::Layout::top_down(egui::Align::Min),
-                                    |ui| {
-                                        downloads_ui::downloads_ui(
-                                            ui,
-                                            &self.dl,
-                                            cpp_ready,
-                                            lang,
-                                            &mut action,
-                                        );
-                                    },
-                                );
+                                    }
+                                }
+                            },
+                        );
+                        ui.add_space(36.0);
+                        // Загрузки: обновление и языки
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(420.0, 0.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                downloads_ui::downloads_ui(ui, &self.dl, cpp_ready, lang, &mut action);
+                            },
+                        );
                             },
                         );
                     });
@@ -3125,11 +3146,8 @@ impl eframe::App for IcApp {
                         ui.monospace(&command);
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if primary_button(
-                                ui,
-                                t2(lang, "Разрешить и запустить", "Allow and run"),
-                            )
-                            .clicked()
+                            if primary_button(ui, t2(lang, "Разрешить и запустить", "Allow and run"))
+                                .clicked()
                             {
                                 action = Some(Action::TrustLang(id.clone()));
                             }
@@ -3146,16 +3164,21 @@ impl eframe::App for IcApp {
             scene_ui::scene_keys(ctx, &mut self.scene_editor);
             let busy = ctx.input(|i| i.pointer.any_down()) || ctx.wants_keyboard_input();
             self.scene_editor.end_frame(busy);
-        } else if !ctx.wants_keyboard_input()
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2))
-        {
+        } else if !ctx.wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
             // F2: переименовать выбранный файл
             if let Some(proj) = &self.project {
                 if proj.selected != proj.dir {
-                    action = Some(Action::PromptOpen(
-                        PromptKind::Rename,
-                        proj.selected.clone(),
-                    ));
+                    action = Some(Action::PromptOpen(PromptKind::Rename, proj.selected.clone()));
+                }
+            }
+        } else if !ctx.wants_keyboard_input()
+            && self.project.is_some()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete))
+        {
+            // Delete: удалить выбранный файл (с подтверждением)
+            if let Some(proj) = &self.project {
+                if proj.selected != proj.dir {
+                    action = Some(Action::PromptOpen(PromptKind::Delete, proj.selected.clone()));
                 }
             }
         }

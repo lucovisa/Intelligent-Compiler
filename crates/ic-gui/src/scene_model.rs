@@ -17,6 +17,8 @@ pub struct SceneNode {
     pub rotation: f32,
     pub color: [u8; 3],
     pub alpha: u8,
+    pub visible: bool,
+    pub locked: bool,
 }
 
 // Рисуются ли узлы этого вида в игре (движок умеет только цветные прямоугольники)
@@ -42,18 +44,11 @@ pub fn is_visual(kind: &str) -> bool {
     )
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Drag {
-    Move {
-        index: usize,
-        start: (f32, f32),
-        orig: (f32, f32),
-    },
-    Resize {
-        index: usize,
-        handle: u8,
-        orig: (f32, f32, f32, f32),
-    },
+    Move { start: (f32, f32), origs: Vec<(usize, f32, f32)> },
+    Resize { index: usize, handle: u8, orig: (f32, f32, f32, f32) },
+    Marquee { start: (f32, f32), additive: bool },
     Pan,
 }
 
@@ -62,6 +57,10 @@ pub struct SceneEditor {
     pub path: Option<PathBuf>,
     pub nodes: Vec<SceneNode>,
     pub selected: Option<usize>,
+    pub extra: Vec<usize>,
+    pub clipboard: Vec<SceneNode>,
+    pub focus_request: bool,
+    pub tree_drag: Option<usize>,
     pub dirty: bool,
     pub status: Option<String>,
     pub drag: Option<Drag>,
@@ -85,6 +84,10 @@ impl Default for SceneEditor {
             path: None,
             nodes: Vec::new(),
             selected: None,
+            extra: Vec::new(),
+            clipboard: Vec::new(),
+            focus_request: false,
+            tree_drag: None,
             dirty: false,
             status: None,
             drag: None,
@@ -140,30 +143,17 @@ fn lua_string(s: &str) -> String {
 // Файл сцены → узлы; старый формат (угол холста, Y вниз) переводится в мировые координаты
 pub fn parse_scene(text: &str) -> Vec<SceneNode> {
     let mut nodes = Vec::new();
-    let v2 = text.lines().any(|l| l.trim() == "ic-scene|2");
-    for line in text
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-    {
+    let v2 = text.lines().any(|l| l.trim() == "ic-scene|2" || l.trim() == "ic-scene|3");
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
         let parts: Vec<&str> = line.split('|').collect();
         if parts.first() != Some(&"node") {
             continue;
         }
-        if v2 && parts.len() == 12 {
+        if v2 && (parts.len() == 12 || parts.len() == 14) {
             let f = |i: usize| parts[i].parse::<f32>().ok();
             let u = |i: usize| parts[i].parse::<u8>().ok();
-            if let (
-                Some(x),
-                Some(y),
-                Some(w),
-                Some(h),
-                Some(r),
-                Some(g),
-                Some(b),
-                Some(rot),
-                Some(a),
-            ) = (f(3), f(4), f(5), f(6), u(7), u(8), u(9), f(10), u(11))
+            if let (Some(x), Some(y), Some(w), Some(h), Some(r), Some(g), Some(b), Some(rot), Some(a)) =
+                (f(3), f(4), f(5), f(6), u(7), u(8), u(9), f(10), u(11))
             {
                 nodes.push(SceneNode {
                     kind: parts[1].to_string(),
@@ -175,6 +165,8 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
                     rotation: rot,
                     color: [r, g, b],
                     alpha: a,
+                    visible: parts.get(12).map_or(true, |v| *v != "0"),
+                    locked: parts.get(13).is_some_and(|v| *v == "1"),
                 });
             }
         } else if !v2 && (parts.len() == 9 || parts.len() == 10) {
@@ -199,6 +191,8 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
                     rotation: 0.0,
                     color: [r, g, b],
                     alpha: 255,
+                    visible: true,
+                    locked: false,
                 });
             }
         }
@@ -207,10 +201,10 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
 }
 
 pub fn scene_text(nodes: &[SceneNode]) -> String {
-    let mut out = String::from("ic-scene|2\n");
+    let mut out = String::from("ic-scene|3\n");
     for n in nodes {
         out.push_str(&format!(
-            "node|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}\n",
+            "node|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}\n",
             n.kind,
             n.name.replace('|', "%7C").replace('\n', " "),
             fmt(n.x),
@@ -221,7 +215,9 @@ pub fn scene_text(nodes: &[SceneNode]) -> String {
             n.color[1],
             n.color[2],
             fmt(n.rotation),
-            n.alpha
+            n.alpha,
+            u8::from(n.visible),
+            u8::from(n.locked)
         ));
     }
     out
@@ -244,7 +240,7 @@ pub fn scene_lua(nodes: &[SceneNode]) -> String {
             fmt(srgb_to_linear(n.color[1])),
             fmt(srgb_to_linear(n.color[2])),
             fmt(n.alpha as f32 / 255.0),
-            is_visual(&n.kind)
+            is_visual(&n.kind) && n.visible
         ));
     }
     out.push_str("}\n");
@@ -262,12 +258,8 @@ fn ensure_loader(project: &Path) -> Result<(), String> {
     match fs::read_to_string(&path) {
         Ok(text) if text.contains("function scene.load") => Ok(()),
         Ok(text) => {
-            let start = LOADER
-                .find("function scene.load")
-                .ok_or("шаблон scene.lua повреждён")?;
-            let end = LOADER
-                .rfind("return scene")
-                .ok_or("шаблон scene.lua повреждён")?;
+            let start = LOADER.find("function scene.load").ok_or("шаблон scene.lua повреждён")?;
+            let end = LOADER.rfind("return scene").ok_or("шаблон scene.lua повреждён")?;
             let snippet = &LOADER[start..end];
             let patched = match text.rfind("return scene") {
                 Some(i) => format!("{}{}{}", &text[..i], snippet, &text[i..]),
@@ -289,10 +281,9 @@ impl SceneEditor {
             return;
         }
         let path = dir.join(SCENE_FILE);
-        self.nodes = fs::read_to_string(&path)
-            .map(|t| parse_scene(&t))
-            .unwrap_or_default();
-        self.selected = None;
+        self.nodes = fs::read_to_string(&path).map(|t| parse_scene(&t)).unwrap_or_default();
+        self.clear_selection();
+        self.clipboard.clear();
         self.dirty = false;
         self.status = None;
         self.drag = None;
@@ -339,10 +330,7 @@ impl SceneEditor {
         if !taken(base) {
             return base.to_string();
         }
-        (2..)
-            .map(|i| format!("{base}{i}"))
-            .find(|n| !taken(n))
-            .unwrap_or_default()
+        (2..).map(|i| format!("{base}{i}")).find(|n| !taken(n)).unwrap_or_default()
     }
 
     pub fn add_node_kind(&mut self, kind: &str) {
@@ -353,23 +341,22 @@ impl SceneEditor {
         self.nodes.push(SceneNode {
             kind: kind.to_string(),
             name,
-            x: (n * 24.0 - 120.0).rem_euclid(240.0) - 120.0,
-            y: 120.0 - (n * 24.0).rem_euclid(240.0),
+            x: (n * 112.0).rem_euclid(560.0) - 280.0,
+            y: 120.0 - (n * 80.0).rem_euclid(240.0),
             width,
             height,
             rotation: 0.0,
             color,
             alpha: 255,
+            visible: true,
+            locked: false,
         });
-        self.selected = Some(self.nodes.len() - 1);
+        self.set_selection(&[self.nodes.len() - 1]);
         self.finish_change();
     }
 
     pub fn rename(&mut self, index: usize, new: &str) {
-        let clean: String = new
-            .chars()
-            .filter(|c| !c.is_control() && *c != '|')
-            .collect();
+        let clean: String = new.chars().filter(|c| !c.is_control() && *c != '|').collect();
         let clean = clean.trim();
         if clean.is_empty() || index >= self.nodes.len() || self.nodes[index].name == clean {
             return;
@@ -387,28 +374,131 @@ impl SceneEditor {
         }
     }
 
-    pub fn duplicate_selected(&mut self) {
-        let Some(i) = self.selected.filter(|i| *i < self.nodes.len()) else {
+    // Все выделенные узлы по возрастанию индекса
+    pub fn all_selected(&self) -> Vec<usize> {
+        let mut v: Vec<usize> = self
+            .selected
+            .into_iter()
+            .chain(self.extra.iter().copied())
+            .filter(|i| *i < self.nodes.len())
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    pub fn is_selected(&self, i: usize) -> bool {
+        self.selected == Some(i) || self.extra.contains(&i)
+    }
+
+    pub fn set_selection(&mut self, items: &[usize]) {
+        self.selected = items.last().copied();
+        self.extra = items.iter().copied().take(items.len().saturating_sub(1)).collect();
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+        self.extra.clear();
+    }
+
+    pub fn toggle_select(&mut self, i: usize) {
+        let mut all = self.all_selected();
+        if let Some(pos) = all.iter().position(|x| *x == i) {
+            all.remove(pos);
+        } else {
+            all.push(i);
+        }
+        self.set_selection(&all);
+    }
+
+    pub fn select_all(&mut self) {
+        let all: Vec<usize> = (0..self.nodes.len()).collect();
+        self.set_selection(&all);
+    }
+
+    pub fn copy_selected(&mut self) {
+        self.clipboard = self.all_selected().iter().map(|i| self.nodes[*i].clone()).collect();
+    }
+
+    // Вставка копий со смещением и новыми именами
+    pub fn paste(&mut self) {
+        if self.clipboard.is_empty() {
             return;
-        };
+        }
         self.checkpoint();
-        let mut copy = self.nodes[i].clone();
-        copy.name = self.unique_name(&copy.name, None);
-        copy.x += 16.0;
-        copy.y -= 16.0;
-        self.nodes.insert(i + 1, copy);
-        self.selected = Some(i + 1);
+        let mut added = Vec::new();
+        for mut node in self.clipboard.clone() {
+            node.name = self.unique_name(&node.name, None);
+            node.x += 16.0;
+            node.y -= 16.0;
+            self.nodes.push(node);
+            added.push(self.nodes.len() - 1);
+        }
+        self.clipboard = added.iter().map(|i| self.nodes[*i].clone()).collect();
+        self.set_selection(&added);
+        self.finish_change();
+    }
+
+    pub fn duplicate_selected(&mut self) {
+        let all = self.all_selected();
+        if all.is_empty() {
+            return;
+        }
+        self.checkpoint();
+        let mut added = Vec::new();
+        for i in all {
+            let mut copy = self.nodes[i].clone();
+            copy.name = self.unique_name(&copy.name, None);
+            copy.x += 16.0;
+            copy.y -= 16.0;
+            self.nodes.push(copy);
+            added.push(self.nodes.len() - 1);
+        }
+        self.set_selection(&added);
         self.finish_change();
     }
 
     pub fn delete_selected(&mut self) {
-        let Some(i) = self.selected.filter(|i| *i < self.nodes.len()) else {
+        let all = self.all_selected();
+        if all.is_empty() {
             return;
-        };
+        }
         self.checkpoint();
-        self.nodes.remove(i);
-        self.selected = None;
+        for i in all.into_iter().rev() {
+            self.nodes.remove(i);
+        }
+        self.clear_selection();
         self.finish_change();
+    }
+
+    // Перетаскивание строки дерева: узел переезжает на новое место списка (слой)
+    pub fn move_node(&mut self, from: usize, to: usize) {
+        if from >= self.nodes.len() || to >= self.nodes.len() || from == to {
+            return;
+        }
+        self.checkpoint();
+        let node = self.nodes.remove(from);
+        self.nodes.insert(to, node);
+        self.set_selection(&[to]);
+        self.finish_change();
+    }
+
+    // Границы выделенных узлов в мире: (мин x, мин y, макс x, макс y)
+    pub fn selection_bounds(&self) -> Option<(f32, f32, f32, f32)> {
+        let mut b: Option<(f32, f32, f32, f32)> = None;
+        for i in self.all_selected() {
+            let n = &self.nodes[i];
+            let (s, c) = n.rotation.to_radians().sin_cos();
+            for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let (lx, ly) = (sx * n.width / 2.0, sy * n.height / 2.0);
+                let (x, y) = (n.x + lx * c - ly * s, n.y + lx * s + ly * c);
+                b = Some(match b {
+                    None => (x, y, x, y),
+                    Some((a0, a1, a2, a3)) => (a0.min(x), a1.min(y), a2.max(x), a3.max(y)),
+                });
+            }
+        }
+        b
     }
 
     pub fn move_layer(&mut self, delta: isize) {
@@ -421,7 +511,7 @@ impl SceneEditor {
         }
         self.checkpoint();
         self.nodes.swap(i, j as usize);
-        self.selected = Some(j as usize);
+        self.set_selection(&[j as usize]);
         self.finish_change();
     }
 
@@ -483,8 +573,10 @@ impl SceneEditor {
     }
 
     fn after_history(&mut self) {
-        if self.selected.is_some_and(|i| i >= self.nodes.len()) {
-            self.selected = None;
+        if self.all_selected().len() != usize::from(self.selected.is_some()) + self.extra.len()
+            || self.selected.is_some_and(|i| i >= self.nodes.len())
+        {
+            self.clear_selection();
         }
         self.finish_change();
     }
@@ -525,6 +617,8 @@ mod tests {
             rotation: 90.0,
             color: [255, 128, 0],
             alpha: 200,
+            visible: true,
+            locked: false,
         }
     }
 
@@ -607,11 +701,73 @@ mod tests {
         let mut s = SceneEditor::default();
         s.add_node_kind("Label");
         s.add_node_kind("Button");
-        s.selected = Some(0);
+        s.set_selection(&[0]);
         s.duplicate_selected();
-        assert_eq!(s.nodes[1].name, "Label2");
-        s.move_layer(1);
+        assert_eq!(s.nodes[2].name, "Label2");
         assert_eq!(s.selected, Some(2));
+        s.move_layer(-1);
+        assert_eq!(s.selected, Some(1));
+        assert_eq!(s.nodes[1].name, "Label2");
+    }
+
+    #[test]
+    fn multi_select_copy_paste_delete() {
+        let mut s = SceneEditor::default();
+        for k in ["Label", "Button", "Timer"] {
+            s.add_node_kind(k);
+        }
+        s.select_all();
+        assert_eq!(s.all_selected(), vec![0, 1, 2]);
+        s.toggle_select(1);
+        assert_eq!(s.all_selected(), vec![0, 2]);
+        s.copy_selected();
+        s.paste();
+        assert_eq!(s.nodes.len(), 5);
+        assert_eq!(s.nodes[3].name, "Label2");
+        assert_eq!(s.nodes[4].name, "Timer2");
+        assert_eq!(s.all_selected(), vec![3, 4]);
+        s.delete_selected();
+        assert_eq!(s.nodes.len(), 3);
+        assert!(s.all_selected().is_empty());
+        s.undo();
+        assert_eq!(s.nodes.len(), 5);
+    }
+
+    #[test]
+    fn reorder_layers_by_drag() {
+        let mut s = SceneEditor::default();
+        for k in ["Label", "Button", "Timer"] {
+            s.add_node_kind(k);
+        }
+        s.move_node(0, 2);
+        let names: Vec<&str> = s.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["Button", "Timer", "Label"]);
+        assert_eq!(s.selected, Some(2));
+    }
+
+    #[test]
+    fn hidden_and_locked_survive_roundtrip_and_hide_in_game() {
+        let mut hidden = node("H");
+        hidden.visible = false;
+        hidden.locked = true;
+        let nodes = vec![hidden];
+        let back = parse_scene(&scene_text(&nodes));
+        assert_eq!(back, nodes);
+        assert!(scene_lua(&nodes).contains("visual = false"));
+    }
+
+    #[test]
+    fn selection_bounds_cover_rotated_nodes() {
+        let mut s = SceneEditor::default();
+        s.add_node_kind("ColorRect");
+        s.nodes[0].x = 0.0;
+        s.nodes[0].y = 0.0;
+        s.nodes[0].width = 100.0;
+        s.nodes[0].height = 20.0;
+        s.nodes[0].rotation = 90.0;
+        let (x0, y0, x1, y1) = s.selection_bounds().unwrap();
+        assert!((x0 + 10.0).abs() < 0.01 && (x1 - 10.0).abs() < 0.01);
+        assert!((y0 + 50.0).abs() < 0.01 && (y1 - 50.0).abs() < 0.01);
     }
 
     #[test]
@@ -624,9 +780,7 @@ mod tests {
         s.add_node_kind("ColorRect");
         s.save().unwrap();
         assert!(dir.join("scenes/main.ic-scene").is_file());
-        assert!(fs::read_to_string(dir.join("scenes/main.lua"))
-            .unwrap()
-            .contains("ColorRect"));
+        assert!(fs::read_to_string(dir.join("scenes/main.lua")).unwrap().contains("ColorRect"));
         let loader = fs::read_to_string(dir.join("scene.lua")).unwrap();
         assert!(loader.contains("function scene.load"));
         assert!(loader.trim_end().ends_with("return scene"));

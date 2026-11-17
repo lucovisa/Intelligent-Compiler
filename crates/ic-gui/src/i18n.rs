@@ -762,6 +762,8 @@ impl K {
 
 // Английские тексты, которые тоже можно переводить (ключ — сам английский текст)
 pub const T2_KEYS: &[&str] = &[
+    "Drop files to add them to assets",
+    "Drop a project folder or a .lang / .theme file",
     "Main menu",
     "Run",
     "Theme",
@@ -770,8 +772,31 @@ pub const T2_KEYS: &[&str] = &[
     "IC will run this compiler:",
     "Build command:",
     "Allow and run",
+    "Show / hide",
+    "Lock",
+    "Rename (F2)",
+    "Duplicate (Ctrl+D)",
+    "Move up",
+    "Move down",
     "Modules",
+    "Undo",
+    "Redo",
+    "Fit",
+    "Snap",
+    "Selected nodes:",
     "Node type",
+    "Drawn in game as a rectangle",
+    "Not drawn in game (helper node)",
+    "Rotation (degrees)",
+    "Opacity",
+    "Visible in game",
+    "Locked in editor",
+    "Up",
+    "Down",
+    "Wheel zoom, middle button or Space+drag to pan, Shift multi-select, Alt disables snapping",
+    "not a project (needs main.lua or ic.toml)",
+    "Installed:",
+    "drop a project folder, .lang or .theme here",
     "New version",
     "You have the latest version",
     "No releases on GitHub yet",
@@ -789,6 +814,48 @@ pub const T2_KEYS: &[&str] = &[
     "Download",
     "soon",
     "Your own language or theme: a .lang file in IC-data/languages, a .theme file in IC-data/themes (see _template.txt)",
+    "General",
+    "Save",
+    "Build exe",
+    "Quick open file",
+    "Command palette",
+    "Search in project",
+    "Project settings",
+    "This help",
+    "Files and tabs",
+    "New file",
+    "New folder",
+    "Rename",
+    "Delete selected file",
+    "Close tab",
+    "Next tab",
+    "Previous tab",
+    "Window",
+    "Toggle explorer",
+    "Toggle log",
+    "Script mode",
+    "Scene editor mode",
+    "Code",
+    "Toggle line comment",
+    "Undo / redo",
+    "Scene editor",
+    "Select all",
+    "Add node to selection",
+    "Copy / paste nodes",
+    "Duplicate",
+    "Delete nodes",
+    "Nudge by 1 (Shift: 10)",
+    "Focus selection / fit frame",
+    "Clear selection",
+    "Disable snapping",
+    "Pan the canvas (or middle button)",
+    "Drag and drop",
+    "Into a project window: copied to assets",
+    "Into the main menu: opens the project",
+    "Into the main menu: installed into IC-data",
+    "Move to another folder",
+    "Change the layer order",
+    "Keyboard shortcuts",
 ];
 
 pub struct Custom {
@@ -827,9 +894,7 @@ pub struct UiLang {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
+    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
 }
 
 // Строка в кавычках с экранированием; возвращает значение и остаток
@@ -851,8 +916,7 @@ fn parse_quoted(s: &str) -> Option<(String, &str)> {
 }
 
 pub fn is_ui_lang_text(text: &str) -> bool {
-    text.lines()
-        .any(|l| l.trim_start().starts_with("interface"))
+    text.lines().any(|l| l.trim_start().starts_with("interface"))
 }
 
 pub fn parse_ui_lang(text: &str, id: &str) -> Result<UiLang, String> {
@@ -868,8 +932,7 @@ pub fn parse_ui_lang(text: &str, id: &str) -> Result<UiLang, String> {
             continue;
         }
         let (key, after): (String, String) = if line.starts_with('"') {
-            let (k, r) = parse_quoted(line)
-                .ok_or_else(|| format!("{id}: строка {}: неверный ключ", n + 1))?;
+            let (k, r) = parse_quoted(line).ok_or_else(|| format!("{id}: строка {}: неверный ключ", n + 1))?;
             (k, r.to_string())
         } else {
             let (k, r) = line
@@ -897,10 +960,7 @@ pub fn parse_ui_lang(text: &str, id: &str) -> Result<UiLang, String> {
 
 pub fn build_custom(l: &UiLang) -> Custom {
     let names: HashMap<String, K> = K::ALL.iter().map(|k| (format!("{k:?}"), *k)).collect();
-    let mut c = Custom {
-        by_k: HashMap::new(),
-        by_text: HashMap::new(),
-    };
+    let mut c = Custom { by_k: HashMap::new(), by_text: HashMap::new() };
     for (key, value) in &l.strings {
         let value: &'static str = Box::leak(value.clone().into_boxed_str());
         if let Some(k) = names.get(key) {
