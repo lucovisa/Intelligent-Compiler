@@ -330,14 +330,26 @@ pub fn scene_toolbar_ui(
         {
             run = true;
         }
-        ui.menu_button(t2(lang, "Модули", "Modules"), |ui| {
-            for g in Generator::ALL {
-                if g != Generator::Scene && ui.button(generator_label(lang, g)).clicked() {
-                    generator = Some(g);
-                    ui.close_menu();
-                }
+        // Модули: клик добавляет, перетаскивание на холст — тоже
+        ui.label(t2(lang, "Модули:", "Modules:"));
+        for g in [Generator::Fps, Generator::Physics] {
+            let resp = ui
+                .add(
+                    egui::Button::new(generator_label(lang, g))
+                        .sense(egui::Sense::click_and_drag()),
+                )
+                .on_hover_text(t2(
+                    lang,
+                    "Клик или перетащи на сцену",
+                    "Click or drag onto the scene",
+                ));
+            if resp.drag_started() {
+                scene.module_drag = Some(g);
             }
-        });
+            if resp.clicked() {
+                generator = Some(g);
+            }
+        }
         if ui
             .add_enabled(
                 scene.can_undo(),
@@ -471,6 +483,35 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
                 .range(-360.0..=360.0),
         );
         ui.add_space(6.0);
+        ui.label(t2(lang, "Картинка", "Texture"));
+        egui::ComboBox::from_id_source("scene_node_texture")
+            .selected_text(if node.texture.is_empty() {
+                "—"
+            } else {
+                node.texture.as_str()
+            })
+            .width(170.0)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(node.texture.is_empty(), "—").clicked() {
+                    node.texture.clear();
+                }
+                for png in &scene.pngs {
+                    if ui.selectable_label(&node.texture == png, png).clicked() {
+                        node.texture = png.clone();
+                    }
+                }
+            });
+        ui.label(t2(lang, "Текст", "Text"));
+        ui.text_edit_singleline(&mut node.text);
+        ui.horizontal(|ui| {
+            ui.label(t2(lang, "Размер шрифта", "Font size"));
+            ui.add(
+                egui::DragValue::new(&mut node.font_size)
+                    .speed(0.5)
+                    .range(4.0..=400.0),
+            );
+        });
+        ui.add_space(6.0);
         ui.label(tr(lang, K::Color));
         ui.color_edit_button_srgb(&mut node.color);
         ui.label(t2(lang, "Прозрачность", "Opacity"));
@@ -583,6 +624,7 @@ pub fn scene_canvas_ui(
     canvas: Color32,
 ) {
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+    scene.canvas_rect = Some(rect);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 4.0, canvas);
     let center = rect.center();
@@ -686,6 +728,21 @@ pub fn scene_canvas_ui(
         Color32::from_rgb(0x4F, 0x9D, 0xE8),
     );
 
+    // Текстуры узлов: загружаем один раз
+    let wanted: Vec<String> = scene
+        .nodes
+        .iter()
+        .filter(|n| !n.texture.is_empty() && !scene.textures.contains_key(&n.texture))
+        .map(|n| n.texture.clone())
+        .collect();
+    for name in wanted {
+        let tex = scene
+            .project_dir
+            .as_ref()
+            .and_then(|dir| load_png_texture(ui.ctx(), &dir.join(&name)));
+        scene.textures.insert(name, tex);
+    }
+
     // Узлы
     for (i, n) in scene.nodes.iter().enumerate() {
         let pts: Vec<egui::Pos2> = corners(n)
@@ -694,10 +751,13 @@ pub fn scene_canvas_ui(
             .collect();
         let base = Color32::from_rgb(n.color[0], n.color[1], n.color[2]);
         let visual = is_visual(&n.kind) && n.visible;
-        let fill = if visual {
-            Color32::from_rgba_unmultiplied(n.color[0], n.color[1], n.color[2], n.alpha)
-        } else {
+        let texture = scene.textures.get(&n.texture).and_then(|t| t.as_ref());
+        let fill = if !visual {
             base.gamma_multiply(0.15)
+        } else if texture.is_some() || n.kind == "Label" {
+            Color32::TRANSPARENT
+        } else {
+            Color32::from_rgba_unmultiplied(n.color[0], n.color[1], n.color[2], n.alpha)
         };
         let selected = scene.is_selected(i);
         painter.add(egui::Shape::convex_polygon(
@@ -708,16 +768,46 @@ pub fn scene_canvas_ui(
                 if selected { Color32::WHITE } else { base },
             ),
         ));
+        if let (Some(tex), true) = (texture, visual) {
+            let mut mesh = egui::Mesh::with_texture(tex.id());
+            let tint = Color32::from_white_alpha(n.alpha);
+            for (p, uv) in pts
+                .iter()
+                .zip([(0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0)])
+            {
+                mesh.vertices.push(egui::epaint::Vertex {
+                    pos: *p,
+                    uv: egui::pos2(uv.0, uv.1),
+                    color: tint,
+                });
+            }
+            mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+            painter.add(egui::Shape::mesh(mesh));
+        }
+        let label = if n.text.is_empty() { &n.name } else { &n.text };
+        let (label_size, label_color) = if n.text.is_empty() {
+            (
+                13.0,
+                if n.locked {
+                    Color32::from_gray(190)
+                } else {
+                    Color32::WHITE
+                },
+            )
+        } else if n.kind == "Label" {
+            (
+                (n.font_size * zoom).clamp(6.0, 400.0),
+                Color32::from_rgb(n.color[0], n.color[1], n.color[2]),
+            )
+        } else {
+            ((n.font_size * zoom).clamp(6.0, 400.0), Color32::WHITE)
+        };
         painter.text(
             w2s(center, pan, zoom, n.x, n.y),
             egui::Align2::CENTER_CENTER,
-            &n.name,
-            FontId::proportional(13.0),
-            if n.locked {
-                Color32::from_gray(190)
-            } else {
-                Color32::WHITE
-            },
+            label,
+            FontId::proportional(label_size),
+            label_color,
         );
     }
     let single = scene.all_selected().len() == 1;
@@ -1165,6 +1255,9 @@ mod tests {
             alpha: 255,
             visible: true,
             locked: false,
+            texture: String::new(),
+            text: String::new(),
+            font_size: 24.0,
         };
         let (hx, hy) = handle_pos(&n, 3);
         assert!(

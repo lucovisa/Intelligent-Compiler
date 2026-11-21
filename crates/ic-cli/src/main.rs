@@ -197,7 +197,12 @@ fn start(script: PathBuf) {
         eprintln!("[IC] {w}");
     }
     let game = or_die(LuaGame::new(&file));
-    let cfg = ic_player::make_config(&settings, game.title_opt());
+    let mut cfg = ic_player::make_config(&settings, game.title_opt());
+    if !settings.icon.is_empty() {
+        cfg.icon = fs::read(&settings.icon)
+            .ok()
+            .and_then(|bytes| ic_lua::decode_icon(&bytes));
+    }
     run(game, cfg);
 }
 
@@ -348,8 +353,18 @@ fn compile(dir: &Path, out: Option<&Path>, pack: bool, target: Option<&str>) {
     let out = out
         .map(Path::to_path_buf)
         .unwrap_or_else(|| dir.join("build").join(file));
+    // Значок игры: PNG из проекта, на Windows попадает и в сам exe
+    let icon_png: Option<Vec<u8>> = entries
+        .iter()
+        .find(|(p, _)| !proj_settings.icon.is_empty() && *p == proj_settings.icon)
+        .map(|(_, d)| d.clone());
+    if icon_png.is_some() && !cfg!(windows) {
+        println!("      значок exe встраивается только при сборке на Windows; значок окна игры работает везде");
+    }
     let size = or_die(match &runtime {
-        Runtime::Embedded(bytes) => ic_build::write_game(&entries, bytes, &out),
+        Runtime::Embedded(bytes) => {
+            ic_build::write_game_with_icon(&entries, bytes, &out, icon_png.as_deref())
+        }
         Runtime::File(path) => ic_build::pack_entries(&entries, path, &out),
     });
     println!(

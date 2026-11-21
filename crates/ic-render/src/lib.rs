@@ -6,10 +6,10 @@ use renderer::Renderer;
 use std::sync::Arc;
 use winit::{
     dpi::LogicalSize,
-    event::{ElementState, Event, KeyEvent, WindowEvent},
+    event::{ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::Window,
+    window::{Icon, Window},
 };
 
 fn map_key(code: KeyCode) -> Option<Key> {
@@ -29,7 +29,8 @@ fn map_key(code: KeyCode) -> Option<Key> {
     })
 }
 
-pub fn run<G: Game + 'static>(game: G, cfg: Config) {
+pub fn run<G: Game + 'static>(mut game: G, cfg: Config) {
+    let atlas = game.atlas();
     let event_loop = EventLoop::new().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
 
@@ -38,12 +39,17 @@ pub fn run<G: Game + 'static>(game: G, cfg: Config) {
             .create_window(
                 Window::default_attributes()
                     .with_title(cfg.title)
+                    .with_window_icon(
+                        cfg.icon
+                            .as_ref()
+                            .and_then(|(rgba, w, h)| Icon::from_rgba(rgba.clone(), *w, *h).ok()),
+                    )
                     .with_inner_size(LogicalSize::new(cfg.width as f64, cfg.height as f64)),
             )
             .expect("window"),
     );
 
-    let mut renderer = Renderer::new(window.clone());
+    let mut renderer = Renderer::new(window.clone(), atlas);
     let mut engine = Engine::new(game, cfg.tick_rate);
     let size = window.inner_size();
     engine.ctx.screen_size = Vec2::new(size.width as f32, size.height as f32);
@@ -71,6 +77,29 @@ pub fn run<G: Game + 'static>(game: G, cfg: Config) {
                     if let Some(k) = map_key(code) {
                         engine.ctx.input.set(k, state == ElementState::Pressed);
                     }
+                }
+                WindowEvent::CursorMoved { position, .. } => {
+                    engine.ctx.input.mouse_pos = Vec2::new(position.x as f32, position.y as f32);
+                }
+                WindowEvent::MouseInput { state, button, .. } => {
+                    let index = match button {
+                        MouseButton::Left => Some(0),
+                        MouseButton::Right => Some(1),
+                        MouseButton::Middle => Some(2),
+                        _ => None,
+                    };
+                    if let Some(i) = index {
+                        engine
+                            .ctx
+                            .input
+                            .set_mouse_button(i, state == ElementState::Pressed);
+                    }
+                }
+                WindowEvent::MouseWheel { delta, .. } => {
+                    engine.ctx.input.wheel += match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y,
+                        MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
+                    };
                 }
                 WindowEvent::RedrawRequested => {
                     engine.frame();

@@ -5,4 +5,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+png = "0.18"
 zip = { version = "2", default-features = false, features = ["deflate"] }

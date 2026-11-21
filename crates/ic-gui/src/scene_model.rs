@@ -19,6 +19,10 @@ pub struct SceneNode {
     pub alpha: u8,
     pub visible: bool,
     pub locked: bool,
+    // Картинка из проекта (путь вида assets/hero.png), текст и размер шрифта
+    pub texture: String,
+    pub text: String,
+    pub font_size: f32,
 }
 
 // Рисуются ли узлы этого вида в игре (движок умеет только цветные прямоугольники)
@@ -71,6 +75,11 @@ pub struct SceneEditor {
     pub clipboard: Vec<SceneNode>,
     pub focus_request: bool,
     pub tree_drag: Option<usize>,
+    pub module_drag: Option<Generator>,
+    pub canvas_rect: Option<egui::Rect>,
+    pub project_dir: Option<PathBuf>,
+    pub pngs: Vec<String>,
+    pub textures: HashMap<String, Option<egui::TextureHandle>>,
     pub dirty: bool,
     pub status: Option<String>,
     pub drag: Option<Drag>,
@@ -98,6 +107,11 @@ impl Default for SceneEditor {
             clipboard: Vec::new(),
             focus_request: false,
             tree_drag: None,
+            module_drag: None,
+            canvas_rect: None,
+            project_dir: None,
+            pngs: Vec::new(),
+            textures: HashMap::new(),
             dirty: false,
             status: None,
             drag: None,
@@ -136,6 +150,18 @@ fn srgb_to_linear(v: u8) -> f32 {
     }
 }
 
+fn escape(s: &str) -> String {
+    s.replace('%', "%25")
+        .replace('|', "%7C")
+        .replace('\n', "%0A")
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("%0A", "\n")
+        .replace("%7C", "|")
+        .replace("%25", "%")
+}
+
 fn lua_string(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -153,9 +179,7 @@ fn lua_string(s: &str) -> String {
 // Файл сцены → узлы; старый формат (угол холста, Y вниз) переводится в мировые координаты
 pub fn parse_scene(text: &str) -> Vec<SceneNode> {
     let mut nodes = Vec::new();
-    let v2 = text
-        .lines()
-        .any(|l| l.trim() == "ic-scene|2" || l.trim() == "ic-scene|3");
+    let v2 = text.lines().any(|l| l.trim().starts_with("ic-scene|"));
     for line in text
         .lines()
         .map(str::trim)
@@ -165,7 +189,7 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
         if parts.first() != Some(&"node") {
             continue;
         }
-        if v2 && (parts.len() == 12 || parts.len() == 14) {
+        if v2 && (parts.len() == 12 || parts.len() == 14 || parts.len() == 17) {
             let f = |i: usize| parts[i].parse::<f32>().ok();
             let u = |i: usize| parts[i].parse::<u8>().ok();
             if let (
@@ -192,6 +216,9 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
                     alpha: a,
                     visible: parts.get(12).map_or(true, |v| *v != "0"),
                     locked: parts.get(13).is_some_and(|v| *v == "1"),
+                    texture: parts.get(14).map(|v| unescape(v)).unwrap_or_default(),
+                    text: parts.get(15).map(|v| unescape(v)).unwrap_or_default(),
+                    font_size: parts.get(16).and_then(|v| v.parse().ok()).unwrap_or(24.0),
                 });
             }
         } else if !v2 && (parts.len() == 9 || parts.len() == 10) {
@@ -218,6 +245,9 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
                     alpha: 255,
                     visible: true,
                     locked: false,
+                    texture: String::new(),
+                    text: String::new(),
+                    font_size: 24.0,
                 });
             }
         }
@@ -226,10 +256,10 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
 }
 
 pub fn scene_text(nodes: &[SceneNode]) -> String {
-    let mut out = String::from("ic-scene|3\n");
+    let mut out = String::from("ic-scene|4\n");
     for n in nodes {
         out.push_str(&format!(
-            "node|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}\n",
+            "node|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}\n",
             n.kind,
             n.name.replace('|', "%7C").replace('\n', " "),
             fmt(n.x),
@@ -242,7 +272,10 @@ pub fn scene_text(nodes: &[SceneNode]) -> String {
             fmt(n.rotation),
             n.alpha,
             u8::from(n.visible),
-            u8::from(n.locked)
+            u8::from(n.locked),
+            escape(&n.texture),
+            escape(&n.text),
+            fmt(n.font_size)
         ));
     }
     out
@@ -253,7 +286,7 @@ pub fn scene_lua(nodes: &[SceneNode]) -> String {
     let mut out = String::from("return {\n");
     for n in nodes {
         out.push_str(&format!(
-            "    {{ kind = {}, name = {}, x = {}, y = {}, w = {}, h = {}, rot = {}, r = {}, g = {}, b = {}, a = {}, visual = {} }},\n",
+            "    {{ kind = {}, name = {}, x = {}, y = {}, w = {}, h = {}, rot = {}, r = {}, g = {}, b = {}, a = {}, visual = {}, tex = {}, text = {}, size = {} }},\n",
             lua_string(&n.kind),
             lua_string(&n.name),
             fmt(n.x),
@@ -265,7 +298,10 @@ pub fn scene_lua(nodes: &[SceneNode]) -> String {
             fmt(srgb_to_linear(n.color[1])),
             fmt(srgb_to_linear(n.color[2])),
             fmt(n.alpha as f32 / 255.0),
-            is_visual(&n.kind) && n.visible
+            is_visual(&n.kind) && n.visible,
+            lua_string(&n.texture),
+            lua_string(&n.text),
+            fmt(n.font_size)
         ));
     }
     out.push_str("}\n");
@@ -274,22 +310,59 @@ pub fn scene_lua(nodes: &[SceneNode]) -> String {
 
 const LOADER: &str = include_str!("../../ic-build/templates/scene.lua");
 
-// В scene.lua должен быть scene.load; у старых проектов дописываем
+// Все PNG проекта (до глубины 4), пути с «/»
+pub fn list_pngs(root: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, depth: u32, out: &mut Vec<String>) {
+        let Ok(rd) = fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            if p.is_dir() {
+                if depth < 4 && !matches!(name.as_str(), "build" | "target" | ".ic" | ".git") {
+                    walk(root, &p, depth + 1, out);
+                }
+            } else if name.to_ascii_lowercase().ends_with(".png") {
+                if let Ok(rel) = p.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, 0, &mut out);
+    out.sort();
+    out
+}
+
+// Загрузчик первой версии (без картинок и текста): его заменяем на новый целиком
+const OLD_LOADER: &str = include_str!("old_scene_loader.lua");
+
+// В scene.lua должен быть scene.load; у старых проектов дописываем или обновляем
 fn ensure_loader(project: &Path) -> Result<(), String> {
     let path = project.join("scene.lua");
     if !project_path_is_safe(project, &path) && path.exists() {
         return Err("scene.lua вне проекта".into());
     }
+    let start = LOADER
+        .find("function scene.load")
+        .ok_or("шаблон scene.lua повреждён")?;
+    let end = LOADER
+        .rfind("return scene")
+        .ok_or("шаблон scene.lua повреждён")?;
+    let snippet = &LOADER[start..end];
     match fs::read_to_string(&path) {
-        Ok(text) if text.contains("function scene.load") => Ok(()),
+        Ok(text) if text.contains("function level.clicked") => Ok(()),
+        Ok(text) if text.contains(OLD_LOADER.trim_end()) => fs::write(
+            &path,
+            text.replace(OLD_LOADER.trim_end(), snippet.trim_end()),
+        )
+        .map_err(|e| e.to_string()),
+        Ok(text) if text.contains("function scene.load") => {
+            Err("scene.lua: свой scene.load не обновлён — удали его и сохрани сцену ещё раз".into())
+        }
         Ok(text) => {
-            let start = LOADER
-                .find("function scene.load")
-                .ok_or("шаблон scene.lua повреждён")?;
-            let end = LOADER
-                .rfind("return scene")
-                .ok_or("шаблон scene.lua повреждён")?;
-            let snippet = &LOADER[start..end];
             let patched = match text.rfind("return scene") {
                 Some(i) => format!("{}{}{}", &text[..i], snippet, &text[i..]),
                 None => format!("{text}\n{snippet}"),
@@ -324,6 +397,29 @@ impl SceneEditor {
         self.gesture_base = None;
         self.fitted = false;
         self.path = Some(path);
+        self.project_dir = Some(project_dir.to_path_buf());
+        self.refresh_pngs();
+    }
+
+    // PNG проекта для выбора текстуры
+    pub fn refresh_pngs(&mut self) {
+        self.textures.clear();
+        self.pngs = self
+            .project_dir
+            .as_deref()
+            .map(list_pngs)
+            .unwrap_or_default();
+    }
+
+    // Добавляет спрайт с текстурой (перетаскивание PNG на сцену)
+    pub fn add_sprite_with_texture(&mut self, texture: &str, size: (f32, f32)) {
+        self.add_node_kind("Sprite2D");
+        if let Some(n) = self.nodes.last_mut() {
+            n.texture = texture.to_string();
+            n.width = size.0;
+            n.height = size.1;
+        }
+        self.finish_change();
     }
 
     pub fn save(&mut self) -> Result<(), String> {
@@ -384,6 +480,13 @@ impl SceneEditor {
             alpha: 255,
             visible: true,
             locked: false,
+            texture: String::new(),
+            text: match kind {
+                "Label" => "Label".to_string(),
+                "Button" => "Button".to_string(),
+                _ => String::new(),
+            },
+            font_size: 24.0,
         });
         self.set_selection(&[self.nodes.len() - 1]);
         self.finish_change();
@@ -664,6 +767,9 @@ mod tests {
             alpha: 200,
             visible: true,
             locked: false,
+            texture: "assets/a|b.png".into(),
+            text: "Привет|мир\nстрока".into(),
+            font_size: 18.0,
         }
     }
 
@@ -691,6 +797,8 @@ mod tests {
         assert!(lua.contains("r = 1,"));
         assert!(lua.contains("g = 0.216"));
         assert!(lua.contains("visual = true"));
+        assert!(lua.contains("tex = \"assets/a|b.png\""));
+        assert!(lua.contains("size = 18"));
         assert!(!lua.contains("--"));
     }
 

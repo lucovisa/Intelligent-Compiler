@@ -3,6 +3,8 @@ pub mod downloads;
 pub mod langs;
 pub mod scaffold;
 mod settings;
+pub mod tools;
+pub mod winicon;
 
 pub use settings::ProjectSettings;
 
@@ -60,6 +62,16 @@ pub fn write_game(
     runtime: &[u8],
     out: &Path,
 ) -> Result<u64, String> {
+    write_game_with_icon(entries, runtime, out, None)
+}
+
+// Игра со своим значком: на Windows правим ресурсы exe до дописывания данных
+pub fn write_game_with_icon(
+    entries: &[(String, Vec<u8>)],
+    runtime: &[u8],
+    out: &Path,
+    icon_png: Option<&[u8]>,
+) -> Result<u64, String> {
     let mut payload: Vec<u8> = Vec::new();
     for (rel, data) in entries {
         payload.extend((rel.len() as u32).to_le_bytes());
@@ -68,6 +80,19 @@ pub fn write_game(
         payload.extend(data);
     }
 
+    let patched;
+    let mut runtime = runtime;
+    if let (Some(png), true) = (icon_png, cfg!(windows)) {
+        confine::check(out)?;
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let set = winicon::IconSet::from_png(png)?;
+        fs::write(out, runtime).map_err(|e| e.to_string())?;
+        winicon::set_exe_icon(out, &set)?;
+        patched = fs::read(out).map_err(|e| e.to_string())?;
+        runtime = &patched;
+    }
     let mut exe: Vec<u8> = Vec::with_capacity(runtime.len() + payload.len() + 16);
     exe.extend(runtime);
     exe.extend(&payload);

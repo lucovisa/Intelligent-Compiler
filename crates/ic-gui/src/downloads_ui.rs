@@ -5,7 +5,7 @@ use std::sync::mpsc::Sender as DlSender;
 pub enum DlEvent {
     Update(Result<Option<String>, String>),
     Installed(Result<String, String>),
-    Cpp(Result<PathBuf, String>),
+    Tool(String, Result<PathBuf, String>),
 }
 
 #[derive(Default)]
@@ -13,15 +13,22 @@ pub struct DownloadState {
     pub busy: bool,
     pub update_msg: String,
     pub update_tag: Option<String>,
-    pub cpp_msg: String,
+    pub tool_msgs: HashMap<String, String>,
+    pub busy_tool: Option<String>,
+    pub installed: HashSet<String>,
     pub drop_msg: String,
 }
 
-pub fn cpp_installed() -> bool {
-    ic_build::confine::data_dir().is_some_and(|d| {
-        d.join("languages").join("cpp.lang").is_file()
-            && downloads::zig_exe(&d.join("toolchains")).is_file()
-    })
+// Какие языки уже установлены
+pub fn installed_tools() -> HashSet<String> {
+    let Some(data) = ic_build::confine::data_dir() else {
+        return HashSet::new();
+    };
+    ic_build::tools::TOOLS
+        .iter()
+        .filter(|t| ic_build::tools::is_installed(t.id, &data))
+        .map(|t| t.id.to_string())
+        .collect()
 }
 
 impl IcApp {
@@ -121,11 +128,18 @@ impl IcApp {
                         t2(lang, "обновлено, перезапусти IC", "updated, restart IC")
                     );
                 }
-                DlEvent::Cpp(Ok(_)) => {
-                    self.dl.cpp_msg = t2(lang, "C++ установлен", "C++ installed").into();
+                DlEvent::Tool(id, Ok(_)) => {
+                    self.dl.busy_tool = None;
+                    self.dl
+                        .tool_msgs
+                        .insert(id, t2(lang, "Установлено", "Installed").into());
                     self.reload_langs();
+                    self.dl.installed = installed_tools();
                 }
-                DlEvent::Cpp(Err(e)) => self.dl.cpp_msg = e,
+                DlEvent::Tool(id, Err(e)) => {
+                    self.dl.busy_tool = None;
+                    self.dl.tool_msgs.insert(id, e);
+                }
             }
         }
     }
@@ -166,26 +180,19 @@ impl IcApp {
         });
     }
 
-    pub(super) fn dl_install_cpp(&mut self) {
+    pub(super) fn dl_install_tool(&mut self, id: String) {
         let Some(data) = ic_build::confine::data_dir() else {
             return;
         };
-        if self.dl.busy {
+        if self.dl.busy || self.dl.busy_tool.is_some() {
             return;
         }
-        self.dl.busy = true;
-        self.dl.cpp_msg.clear();
+        self.dl.busy_tool = Some(id.clone());
+        self.dl.tool_msgs.remove(&id);
         let (tx, ctx) = (self.dl_tx.clone(), self.ctx.clone());
         thread::spawn(move || {
-            let result = (|| {
-                let zig = downloads::install_zig(&data.join("toolchains"))?;
-                let langs = data.join("languages");
-                fs::create_dir_all(&langs).map_err(|e| e.to_string())?;
-                fs::write(langs.join("cpp.lang"), downloads::cpp_lang_text(&zig))
-                    .map_err(|e| e.to_string())?;
-                Ok(zig)
-            })();
-            let _ = tx.send(DlEvent::Cpp(result));
+            let result = ic_build::tools::install_and_register(&id, &data);
+            let _ = tx.send(DlEvent::Tool(id, result));
             ctx.request_repaint();
         });
     }
@@ -200,7 +207,6 @@ fn card_title(ui: &mut egui::Ui, text: &str) {
 pub fn downloads_ui(
     ui: &mut egui::Ui,
     dl: &DownloadState,
-    cpp_ready: bool,
     lang: Lang,
     action: &mut Option<Action>,
 ) {
@@ -255,28 +261,46 @@ pub fn downloads_ui(
             ui.set_width(ui.available_width());
             card_title(ui, t2(lang, "ЯЗЫКИ", "LANGUAGES"));
             ui.horizontal(|ui| {
-                ui.label("C++ (Zig)");
+                ui.label("Lua 5.4");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if cpp_ready {
-                        ui.colored_label(
-                            Color32::from_rgb(0x4E, 0xC9, 0x7B),
-                            t2(lang, "Установлен", "Installed"),
-                        );
-                    } else if button_on(ui, !dl.busy, t2(lang, "Скачать", "Download")).clicked() {
-                        *action = Some(Action::InstallCpp);
-                    }
+                    ui.colored_label(Color32::from_rgb(0x4E, 0xC9, 0x7B), t2(lang, "Встроен", "Built in"));
                 });
             });
-            for name in ["Rust", "C#"] {
+            ui.label(
+                RichText::new(t2(
+                    lang,
+                    "Компилятор в байт-код, ничего скачивать не нужно",
+                    "Bytecode compiler, nothing to download",
+                ))
+                .small(),
+            );
+            ui.separator();
+            for tool in ic_build::tools::TOOLS {
                 ui.horizontal(|ui| {
-                    ui.label(name);
+                    ui.label(tool.name);
+                    ui.label(RichText::new(tool.size).small());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(t2(lang, "скоро", "soon")));
+                        if dl.installed.contains(tool.id) {
+                            ui.colored_label(
+                                Color32::from_rgb(0x4E, 0xC9, 0x7B),
+                                t2(lang, "Установлен", "Installed"),
+                            );
+                        } else if dl.busy_tool.as_deref() == Some(tool.id) {
+                            ui.spinner();
+                        } else if button_on(
+                            ui,
+                            !dl.busy && dl.busy_tool.is_none(),
+                            t2(lang, "Скачать", "Download"),
+                        )
+                        .clicked()
+                        {
+                            *action = Some(Action::InstallTool(tool.id.to_string()));
+                        }
                     });
                 });
-            }
-            if !dl.cpp_msg.is_empty() {
-                ui.label(RichText::new(&dl.cpp_msg).small());
+                if let Some(msg) = dl.tool_msgs.get(tool.id) {
+                    ui.label(RichText::new(msg).small());
+                }
             }
             if !dl.drop_msg.is_empty() {
                 ui.label(RichText::new(&dl.drop_msg).small());

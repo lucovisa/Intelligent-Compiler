@@ -11,6 +11,8 @@ pub struct ProjectSettings {
     pub kind: String,
     pub dimension: String,
     pub label: String,
+    // Значок игры: PNG внутри проекта
+    pub icon: String,
 }
 
 impl Default for ProjectSettings {
@@ -25,6 +27,7 @@ impl Default for ProjectSettings {
             kind: "game".into(),
             dimension: "2d".into(),
             label: String::new(),
+            icon: String::new(),
         }
     }
 }
@@ -101,6 +104,7 @@ impl ProjectSettings {
                     }
                 }
                 "label" => s.label = v.to_string(),
+                "icon" => s.icon = v.to_string(),
                 _ => warn.push(format!("ic.toml:{n}: неизвестный ключ «{k}»")),
             }
         }
@@ -108,6 +112,14 @@ impl ProjectSettings {
     }
 
     pub fn to_toml(&self) -> String {
+        let mut out = self.to_toml_base();
+        if !self.icon.is_empty() {
+            out.push_str(&format!("icon = \"{}\"\n", self.icon.replace('"', "'")));
+        }
+        out
+    }
+
+    fn to_toml_base(&self) -> String {
         let [r, g, b] = self.background;
         format!(
             "title = \"{}\"\nwidth = {}\nheight = {}\ntick_rate = {}\nbackground = \"#{r:02x}{g:02x}{b:02x}\"\n\
@@ -168,6 +180,7 @@ mod tests {
             kind: "app".into(),
             dimension: "custom".into(),
             label: "Новелла".into(),
+            icon: "icon.png".into(),
         };
         let (back, warn) = ProjectSettings::parse(&s.to_toml());
         assert_eq!(back, s);

@@ -24,8 +24,12 @@ pub fn run_embedded(files: HashMap<String, Vec<u8>>) -> Result<(), String> {
         .get(ProjectSettings::FILE)
         .map(|b| ProjectSettings::parse(&String::from_utf8_lossy(b)).0)
         .unwrap_or_default();
+    let icon = files
+        .get(&settings.icon)
+        .and_then(|bytes| ic_lua::decode_icon(bytes));
     let game = LuaGame::from_files(files)?;
-    let cfg = make_config(&settings, game.title_opt());
+    let mut cfg = make_config(&settings, game.title_opt());
+    cfg.icon = icon;
     run(game, cfg);
     Ok(())
 }

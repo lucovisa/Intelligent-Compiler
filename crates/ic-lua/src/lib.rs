@@ -1,6 +1,9 @@
 #![allow(clippy::type_complexity)]
 
-use ic_core::{Context, Game, Key, Sprite, Vec2, KEY_COUNT};
+mod atlas;
+
+use atlas::AtlasData;
+use ic_core::{AtlasImage, Context, Game, Key, Sprite, Vec2, KEY_COUNT};
 use mlua::{Function, Lua, Table, Value};
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
@@ -13,6 +16,10 @@ struct Shared {
     elapsed: f32,
     camera: (f32, f32, f32),
     quit: bool,
+    mouse: (f32, f32),
+    mouse_down: [bool; 3],
+    mouse_pressed: [bool; 3],
+    wheel: f32,
 }
 
 fn parse_key(name: &str) -> Option<Key> {
@@ -32,7 +39,24 @@ fn parse_key(name: &str) -> Option<Key> {
     })
 }
 
-fn register_api(lua: &Lua, shared: &Rc<RefCell<Shared>>) -> mlua::Result<()> {
+fn mouse_button(v: &Value) -> usize {
+    match v {
+        Value::Integer(i) => (*i as usize).saturating_sub(1).min(2),
+        Value::Number(n) => (*n as usize).saturating_sub(1).min(2),
+        Value::String(s) => match s.to_str().map(|s| s.to_ascii_lowercase()).as_deref() {
+            Ok("right") => 1,
+            Ok("middle") => 2,
+            _ => 0,
+        },
+        _ => 0,
+    }
+}
+
+fn register_api(
+    lua: &Lua,
+    shared: &Rc<RefCell<Shared>>,
+    atlas: &Rc<AtlasData>,
+) -> mlua::Result<()> {
     let ic = lua.create_table()?;
 
     let sh = shared.clone();
@@ -46,10 +70,159 @@ fn register_api(lua: &Lua, shared: &Rc<RefCell<Shared>>) -> mlua::Result<()> {
                     size: Vec2::new(w, h),
                     rotation: rot.unwrap_or(0.0),
                     color: [r, g, b, alpha.unwrap_or(1.0)],
+                    uv: [0.0; 4],
                 });
                 Ok(())
             },
         )?,
+    )?;
+
+    let (sh, at) = (shared.clone(), atlas.clone());
+    ic.set(
+        "image",
+        lua.create_function(
+            move |_,
+                  a: (
+                String,
+                f32,
+                f32,
+                Option<f32>,
+                Option<f32>,
+                Option<f32>,
+                Option<f32>,
+                Option<f32>,
+                Option<f32>,
+                Option<f32>,
+            )| {
+                let (name, x, y, w, h, rot, r, g, b, alpha) = a;
+                let info = at.images.get(&name).ok_or_else(|| {
+                    mlua::Error::RuntimeError(format!(
+                        "нет картинки '{name}' (положи PNG в проект)"
+                    ))
+                })?;
+                sh.borrow_mut().sprites.push(Sprite {
+                    pos: Vec2::new(x, y),
+                    size: Vec2::new(w.unwrap_or(info.w as f32), h.unwrap_or(info.h as f32)),
+                    rotation: rot.unwrap_or(0.0),
+                    color: [
+                        r.unwrap_or(1.0),
+                        g.unwrap_or(1.0),
+                        b.unwrap_or(1.0),
+                        alpha.unwrap_or(1.0),
+                    ],
+                    uv: info.uv,
+                });
+                Ok(())
+            },
+        )?,
+    )?;
+
+    let at = atlas.clone();
+    ic.set(
+        "image_size",
+        lua.create_function(move |_, name: String| {
+            let info = at
+                .images
+                .get(&name)
+                .ok_or_else(|| mlua::Error::RuntimeError(format!("нет картинки '{name}'")))?;
+            Ok((info.w, info.h))
+        })?,
+    )?;
+
+    let (sh, at) = (shared.clone(), atlas.clone());
+    ic.set(
+        "text",
+        lua.create_function(
+            move |_,
+                  a: (
+                String,
+                f32,
+                f32,
+                f32,
+                Option<f32>,
+                Option<f32>,
+                Option<f32>,
+                Option<f32>,
+                Option<String>,
+            )| {
+                let (text, x, y, size, r, g, b, alpha, align) = a;
+                let (quads, width) = atlas::layout(&at, &text, size);
+                let start = match align.as_deref() {
+                    Some("left") => x,
+                    Some("right") => x - width,
+                    _ => x - width / 2.0,
+                };
+                let color = [
+                    r.unwrap_or(1.0),
+                    g.unwrap_or(1.0),
+                    b.unwrap_or(1.0),
+                    alpha.unwrap_or(1.0),
+                ];
+                let mut sh = sh.borrow_mut();
+                for q in quads {
+                    sh.sprites.push(Sprite {
+                        pos: Vec2::new(start + q.dx, y + q.dy),
+                        size: Vec2::new(q.w, q.h),
+                        rotation: 0.0,
+                        color,
+                        uv: q.uv,
+                    });
+                }
+                Ok(width)
+            },
+        )?,
+    )?;
+
+    let at = atlas.clone();
+    ic.set(
+        "text_width",
+        lua.create_function(move |_, (text, size): (String, f32)| {
+            Ok(atlas::layout(&at, &text, size).1)
+        })?,
+    )?;
+
+    let sh = shared.clone();
+    ic.set(
+        "mouse_screen",
+        lua.create_function(move |_, ()| Ok(sh.borrow().mouse))?,
+    )?;
+
+    let sh = shared.clone();
+    ic.set(
+        "mouse",
+        lua.create_function(move |_, ()| {
+            let s = sh.borrow();
+            let (sw, sh_) = (s.screen.0.max(1.0), s.screen.1.max(1.0));
+            let half_y = s.camera.2 * 0.5;
+            let half_x = half_y * sw / sh_;
+            let x = s.camera.0 + (s.mouse.0 / sw - 0.5) * 2.0 * half_x;
+            let y = s.camera.1 - (s.mouse.1 / sh_ - 0.5) * 2.0 * half_y;
+            Ok((x, y))
+        })?,
+    )?;
+
+    let sh = shared.clone();
+    ic.set(
+        "mouse_down",
+        lua.create_function(move |_, b: Option<Value>| {
+            let i = b.as_ref().map_or(0, mouse_button);
+            Ok(sh.borrow().mouse_down[i])
+        })?,
+    )?;
+
+    let sh = shared.clone();
+    ic.set(
+        "mouse_pressed",
+        lua.create_function(move |_, b: Option<Value>| {
+            let i = b.as_ref().map_or(0, mouse_button);
+            Ok(sh.borrow().mouse_pressed[i])
+        })?,
+    )?;
+
+    let sh = shared.clone();
+    ic.set(
+        "wheel",
+        lua.create_function(move |_, ()| Ok(sh.borrow().wheel))?,
     )?;
 
     let sh = shared.clone();
@@ -129,8 +302,17 @@ fn install_embedded_searcher(lua: &Lua, files: Rc<HashMap<String, Vec<u8>>>) -> 
     insert.call::<()>((searchers, 2, searcher))
 }
 
-const API: [&str; 11] = [
+const API: [&str; 20] = [
     "rect",
+    "image",
+    "image_size",
+    "text",
+    "text_width",
+    "mouse",
+    "mouse_screen",
+    "mouse_down",
+    "mouse_pressed",
+    "wheel",
     "key_down",
     "key_pressed",
     "screen",
@@ -169,6 +351,24 @@ pub fn check_sources(files: &[(String, Vec<u8>)]) -> Vec<Diagnostic> {
         }
     }
     out
+}
+
+// Значок окна из PNG: RGBA, не крупнее 256×256
+pub fn decode_icon(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    let (w, h, rgba) = atlas::decode_png(bytes).ok()?;
+    if w <= 256 && h <= 256 {
+        return Some((rgba, w, h));
+    }
+    let k = (w.max(h) as f32 / 256.0).ceil() as u32;
+    let (nw, nh) = ((w / k).max(1), (h / k).max(1));
+    let mut out = Vec::with_capacity((nw * nh * 4) as usize);
+    for y in 0..nh {
+        for x in 0..nw {
+            let o = (((y * k) * w + x * k) * 4) as usize;
+            out.extend_from_slice(&rgba[o..o + 4]);
+        }
+    }
+    Some((out, nw, nh))
 }
 
 // Компиляция Lua в байт-код (Lua 5.4): в игру попадает уже скомпилированный код, без исходников
@@ -280,6 +480,7 @@ pub struct LuaGame {
     lua: Lua,
     shared: Rc<RefCell<Shared>>,
     dead: bool,
+    atlas_image: Option<AtlasImage>,
 }
 
 impl LuaGame {
@@ -289,7 +490,16 @@ impl LuaGame {
 
         let lua = Lua::new();
         let shared = Rc::new(RefCell::new(Shared::default()));
-        register_api(&lua, &shared).map_err(|e| e.to_string())?;
+        let dir = script
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let built = atlas::build(&atlas::collect_disk_images(dir));
+        for w in &built.warnings {
+            eprintln!("[IC] {w}");
+        }
+        let atlas_data = Rc::new(built.data);
+        register_api(&lua, &shared, &atlas_data).map_err(|e| e.to_string())?;
 
         let dir = script
             .parent()
@@ -319,6 +529,7 @@ impl LuaGame {
             lua,
             shared,
             dead: false,
+            atlas_image: Some(built.image),
         })
     }
 
@@ -330,7 +541,18 @@ impl LuaGame {
 
         let lua = Lua::new();
         let shared = Rc::new(RefCell::new(Shared::default()));
-        register_api(&lua, &shared).map_err(|e| e.to_string())?;
+        let mut images: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .filter(|(k, _)| k.to_ascii_lowercase().ends_with(".png"))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        images.sort_by(|a, b| a.0.cmp(&b.0));
+        let built = atlas::build(&images);
+        for w in &built.warnings {
+            eprintln!("[IC] {w}");
+        }
+        let atlas_data = Rc::new(built.data);
+        register_api(&lua, &shared, &atlas_data).map_err(|e| e.to_string())?;
         install_embedded_searcher(&lua, Rc::new(files)).map_err(|e| e.to_string())?;
         lua.load(main.as_slice())
             .set_name("@main.lua")
@@ -341,6 +563,7 @@ impl LuaGame {
             lua,
             shared,
             dead: false,
+            atlas_image: Some(built.image),
         })
     }
 
@@ -363,6 +586,10 @@ impl LuaGame {
             sh.pressed[k as usize] = ctx.input.just_pressed(k);
         }
         sh.screen = (ctx.screen_size.x, ctx.screen_size.y);
+        sh.mouse = (ctx.input.mouse_pos.x, ctx.input.mouse_pos.y);
+        sh.mouse_down = ctx.input.mouse_down;
+        sh.mouse_pressed = ctx.input.mouse_pressed;
+        sh.wheel = ctx.input.wheel;
         sh.elapsed = ctx.time.elapsed;
         sh.camera = (ctx.camera.center.x, ctx.camera.center.y, ctx.camera.height);
         std::mem::swap(&mut sh.sprites, &mut ctx.draw.sprites);
@@ -405,6 +632,9 @@ impl LuaGame {
 }
 
 impl Game for LuaGame {
+    fn atlas(&mut self) -> Option<AtlasImage> {
+        self.atlas_image.take()
+    }
     fn init(&mut self, ctx: &mut Context) {
         self.call(ctx, "load", None);
     }

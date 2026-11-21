@@ -1,5 +1,6 @@
 mod custom;
 mod downloads_ui;
+mod dragfx;
 mod editing;
 mod hotkeys;
 mod i18n;
@@ -164,6 +165,7 @@ struct Settings {
     trusted: Vec<String>,
     custom_theme: Option<String>,
     custom_lang: Option<String>,
+    auto_update: bool,
 }
 
 impl Settings {
@@ -186,6 +188,7 @@ impl Settings {
             trusted: Vec::new(),
             custom_theme: None,
             custom_lang: None,
+            auto_update: false,
         };
         let mut saved_lang = None;
         if let Some(path) = Self::path() {
@@ -216,6 +219,7 @@ impl Settings {
                             ("lang_explicit", "true") => s.lang_explicit = true,
                             ("recent", v) if !v.is_empty() => s.recent.push(v.to_string()),
                             ("trust", v) if !v.is_empty() => s.trusted.push(v.to_string()),
+                            ("auto_update", v) => s.auto_update = v == "1",
                             _ => {}
                         }
                     }
@@ -254,6 +258,7 @@ impl Settings {
         for t in &self.trusted {
             out.push_str(&format!("trust={t}\n"));
         }
+        out.push_str(&format!("auto_update={}\n", u8::from(self.auto_update)));
         if let Some(path) = Self::path() {
             let _ = fs::write(path, out);
         }
@@ -766,6 +771,30 @@ fn load_png_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHan
     ))
 }
 
+// Копирование папки целиком (брошенной из ОС)
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let target = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+// Размер PNG по заголовку
+fn png_size(path: &Path) -> Option<(u32, u32)> {
+    let reader = png::Decoder::new(BufReader::new(fs::File::open(path).ok()?))
+        .read_info()
+        .ok()?;
+    let info = reader.info();
+    Some((info.width, info.height))
+}
+
 fn valid_name(s: &str) -> bool {
     !s.is_empty() && !s.contains(['/', '\\']) && s != "." && s != ".."
 }
@@ -807,6 +836,7 @@ fn explorer_rows(
     langs: &LangSet,
     icon_set: &icons::IconSet,
     dragging_file: &mut Option<PathBuf>,
+    root_collapsed: &mut bool,
     action: &mut Option<Action>,
 ) {
     let pal = palette(dark);
@@ -814,6 +844,75 @@ fn explorer_rows(
     let indent = 12.0;
     let text_color = ui.visuals().text_color();
     let mut skip: Option<usize> = None;
+
+    // Корень: папка с названием проекта, внутри неё всё остальное
+    {
+        let (rect, resp) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), row_h),
+            egui::Sense::click(),
+        );
+        let selected = proj.selected == proj.dir;
+        let drop_here = resp.hovered() && dragging_file.is_some();
+        let painter = ui.painter();
+        if drop_here {
+            painter.rect_filled(rect, 0.0, pal.accent.gamma_multiply(0.45));
+        } else if selected {
+            painter.rect_filled(rect, 0.0, pal.accent.gamma_multiply(0.5));
+        } else if resp.hovered() {
+            painter.rect_filled(rect, 0.0, pal.hover.gamma_multiply(0.7));
+        }
+        let x = rect.left() + 12.0;
+        let cy = rect.center().y;
+        let c = egui::pos2(x + 6.0, cy);
+        let pts = if *root_collapsed {
+            vec![
+                egui::pos2(c.x - 2.5, c.y - 4.0),
+                egui::pos2(c.x - 2.5, c.y + 4.0),
+                egui::pos2(c.x + 3.0, c.y),
+            ]
+        } else {
+            vec![
+                egui::pos2(c.x - 4.0, c.y - 2.5),
+                egui::pos2(c.x + 4.0, c.y - 2.5),
+                egui::pos2(c.x, c.y + 3.0),
+            ]
+        };
+        painter.add(egui::Shape::convex_polygon(pts, text_color, Stroke::NONE));
+        let icon_rect =
+            egui::Rect::from_min_size(egui::pos2(x + 18.0, cy - 9.0), egui::vec2(18.0, 18.0));
+        icon_set.paint_root(painter, icon_rect, !*root_collapsed, dark);
+        painter.text(
+            egui::pos2(x + 42.0, cy),
+            egui::Align2::LEFT_CENTER,
+            &proj.name,
+            egui::FontId::proportional(13.0),
+            text_color,
+        );
+        if resp.clicked() {
+            *root_collapsed = !*root_collapsed;
+            *action = Some(Action::SelectRoot);
+        }
+        if resp.hovered() && ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
+            if let Some(source) = dragging_file.take() {
+                if source.parent() != Some(proj.dir.as_path()) && source != proj.dir {
+                    *action = Some(Action::MovePath(source, proj.dir.clone()));
+                }
+            }
+        }
+        resp.context_menu(|ui| {
+            if ui.button(tr(lang, K::NewFile)).clicked() {
+                *action = Some(Action::PromptOpen(PromptKind::NewFile, proj.dir.clone()));
+                ui.close_menu();
+            }
+            if ui.button(tr(lang, K::NewFolder)).clicked() {
+                *action = Some(Action::PromptOpen(PromptKind::NewFolder, proj.dir.clone()));
+                ui.close_menu();
+            }
+        });
+    }
+    if *root_collapsed {
+        return;
+    }
 
     for f in &proj.files {
         if let Some(d) = skip {
@@ -839,9 +938,9 @@ fn explorer_rows(
             } else if resp.hovered() {
                 painter.rect_filled(rect, 0.0, pal.hover.gamma_multiply(0.7));
             }
-            let base_x = rect.left() + 12.0;
-            for lvl in 0..f.depth {
-                let gx = base_x + lvl as f32 * indent + 6.0;
+            let base_x = rect.left() + 12.0 + indent;
+            for lvl in 0..=f.depth {
+                let gx = base_x - indent + lvl as f32 * indent + 6.0;
                 painter.line_segment(
                     [egui::pos2(gx, rect.top()), egui::pos2(gx, rect.bottom())],
                     Stroke::new(1.0_f32, pal.border),
@@ -1088,7 +1187,10 @@ enum Action {
     CancelTrust,
     CheckUpdate,
     InstallUpdate,
-    InstallCpp,
+    InstallTool(String),
+    OpenAppSettings,
+    SelectRoot,
+    PasteFile,
 }
 
 struct IcApp {
@@ -1110,6 +1212,9 @@ struct IcApp {
     quick_filter: String,
     command_palette: bool,
     help_open: bool,
+    settings_open: bool,
+    root_collapsed: bool,
+    file_clipboard: Option<PathBuf>,
     show_sidebar: bool,
     show_log: bool,
     command_filter: String,
@@ -1159,6 +1264,9 @@ impl IcApp {
             quick_filter: String::new(),
             command_palette: false,
             help_open: false,
+            settings_open: false,
+            root_collapsed: false,
+            file_clipboard: None,
             show_sidebar: true,
             show_log: true,
             command_filter: String::new(),
@@ -1179,6 +1287,10 @@ impl IcApp {
         };
         ic_build::downloads::cleanup_old_exe();
         app.reload_langs();
+        app.dl.installed = downloads_ui::installed_tools();
+        if app.settings.auto_update {
+            app.dl_check_update();
+        }
         app.apply_custom();
         setup_style(&cc.egui_ctx, app.settings.dark);
         app
@@ -1478,6 +1590,158 @@ impl IcApp {
         }
     }
 
+    // Окно «Настройки»: тема, язык, обновления, папки. Возвращает true, если что-то изменилось
+    fn app_settings_window(&mut self, ctx: &egui::Context) -> bool {
+        let lang = self.settings.lang;
+        let mut changed = false;
+        let mut open = self.settings_open;
+        egui::Window::new(t2(lang, "Настройки", "Settings"))
+            .open(&mut open)
+            .collapsible(false)
+            .default_width(460.0)
+            .show(ctx, |ui| {
+                ui.label(RichText::new(t2(lang, "ВНЕШНИЙ ВИД", "APPEARANCE")).small().strong());
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(t2(lang, "Тема", "Theme"));
+                    let current = if let Some(t) = self
+                        .settings
+                        .custom_theme
+                        .as_ref()
+                        .and_then(|id| self.themes.iter().find(|t| &t.id == id))
+                    {
+                        t.name.clone()
+                    } else if self.settings.theme_system {
+                        t2(lang, "Системная", "System").to_string()
+                    } else if self.settings.dark {
+                        t2(lang, "Тёмная", "Dark").to_string()
+                    } else {
+                        t2(lang, "Светлая", "Light").to_string()
+                    };
+                    let mut picked: Option<(bool, bool, Option<String>)> = None;
+                    egui::ComboBox::from_id_source("settings_theme")
+                        .selected_text(current)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(false, t2(lang, "Системная", "System")).clicked() {
+                                picked = Some((true, system_prefers_dark(), None));
+                            }
+                            if ui.selectable_label(false, t2(lang, "Тёмная", "Dark")).clicked() {
+                                picked = Some((false, true, None));
+                            }
+                            if ui.selectable_label(false, t2(lang, "Светлая", "Light")).clicked() {
+                                picked = Some((false, false, None));
+                            }
+                            for t in &self.themes {
+                                if ui.selectable_label(false, &t.name).clicked() {
+                                    picked = Some((false, t.dark, Some(t.id.clone())));
+                                }
+                            }
+                        });
+                    if let Some((system, dark, custom_id)) = picked {
+                        self.settings.theme_system = system;
+                        self.settings.dark = dark;
+                        self.settings.custom_theme = custom_id;
+                        custom::set_active(None);
+                        self.apply_custom();
+                        changed = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t2(lang, "Язык интерфейса", "Interface language"));
+                    let label = self
+                        .settings
+                        .custom_lang
+                        .as_ref()
+                        .and_then(|id| self.ui_langs.iter().find(|l| &l.id == id))
+                        .map(|l| l.name.clone())
+                        .unwrap_or_else(|| lang.label().to_string());
+                    let mut picked: Option<Option<String>> = None;
+                    egui::ComboBox::from_id_source("settings_lang")
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            for l in Lang::ALL {
+                                if ui.selectable_label(false, l.label()).clicked() {
+                                    self.settings.lang = l;
+                                    picked = Some(None);
+                                }
+                            }
+                            for l in &self.ui_langs {
+                                if ui.selectable_label(false, &l.name).clicked() {
+                                    picked = Some(Some(l.id.clone()));
+                                }
+                            }
+                        });
+                    if let Some(choice) = picked {
+                        self.settings.custom_lang = choice;
+                        self.settings.lang_explicit = true;
+                        self.apply_custom();
+                        changed = true;
+                    }
+                });
+                ui.label(
+                    RichText::new(t2(
+                        lang,
+                        "Свои темы и языки: файлы .theme и .lang в IC-data/themes и IC-data/languages (или перетащи их в главное меню)",
+                        "Your own themes and languages: .theme and .lang files in IC-data/themes and IC-data/languages (or drop them into the main menu)",
+                    ))
+                    .small(),
+                );
+                ui.separator();
+                ui.label(RichText::new(t2(lang, "ОБНОВЛЕНИЯ", "UPDATES")).small().strong());
+                ui.add_space(4.0);
+                ui.label(format!(
+                    "{} v{}",
+                    t2(lang, "Установлена версия", "Installed version"),
+                    env!("CARGO_PKG_VERSION")
+                ));
+                ui.horizontal(|ui| {
+                    if self.dl.busy {
+                        ui.spinner();
+                    } else if let Some(tag) = self.dl.update_tag.clone() {
+                        if primary_button(ui, &format!("{} {tag}", t2(lang, "Установить", "Install"))).clicked() {
+                            self.dl_install_update();
+                        }
+                    } else if button(ui, t2(lang, "Проверить обновления", "Check for updates")).clicked() {
+                        self.dl_check_update();
+                    }
+                });
+                if !self.dl.update_msg.is_empty() {
+                    ui.label(RichText::new(&self.dl.update_msg).small());
+                }
+                if ui
+                    .checkbox(
+                        &mut self.settings.auto_update,
+                        t2(lang, "Проверять при запуске", "Check on startup"),
+                    )
+                    .changed()
+                {
+                    changed = true;
+                }
+                ui.label(RichText::new(format!("github.com/{}/releases", ic_build::downloads::REPO)).small());
+                ui.separator();
+                ui.label(RichText::new(t2(lang, "ПАПКИ", "FOLDERS")).small().strong());
+                ui.add_space(4.0);
+                if let Some(data) = ic_build::confine::data_dir() {
+                    ui.label(format!("{}: {}", t2(lang, "Данные программы", "App data"), data.display()));
+                }
+                ui.label(format!("{}: {}", t2(lang, "Проекты по умолчанию", "Default projects"), self.location));
+                ui.label(
+                    RichText::new(t2(
+                        lang,
+                        "Программа сама пишет только внутрь папки, где лежит. Проект можно держать где угодно: это твой выбор",
+                        "The program writes only inside its own folder. A project may live anywhere: your choice",
+                    ))
+                    .small(),
+                );
+                ui.separator();
+                if button(ui, t2(lang, "Горячие клавиши (F1)", "Keyboard shortcuts (F1)")).clicked() {
+                    self.help_open = true;
+                }
+            });
+        self.settings_open = open;
+        changed
+    }
+
     fn save_scene(&mut self, force: bool) {
         let Some(path) = self.scene_editor.path.clone() else {
             return;
@@ -1618,9 +1882,16 @@ impl IcApp {
             return;
         }
         let out_dir = proj.dir.join("build");
-        if let Err(e) = fs::create_dir_all(&out_dir) {
-            self.log.push(format!("{}: {e}", out_dir.display()));
-            return;
+        let needs_out = l
+            .build
+            .iter()
+            .chain(l.run.iter())
+            .any(|a| a.contains("{out}"));
+        if needs_out {
+            if let Err(e) = fs::create_dir_all(&out_dir) {
+                self.log.push(format!("{}: {e}", out_dir.display()));
+                return;
+            }
         }
         let mut out = out_dir.join(file.file_stem().unwrap_or_default());
         if cfg!(windows) {
@@ -1646,10 +1917,11 @@ impl IcApp {
             ic_build::langs::expand(&l.build, &vars),
             ic_build::langs::expand(&l.run, &vars),
         ];
-        if steps[0].is_empty() {
-            self.log.push(format!("{}: пустая команда build", l.name));
+        if steps.iter().all(|s| s.is_empty()) {
+            self.log.push(format!("{}: нет команд build и run", l.name));
             return;
         }
+        let envs = l.env.clone();
         let cwd = proj.dir.clone();
         let data = ic_build::confine::data_dir();
         let tx = self.tx.clone();
@@ -1668,6 +1940,9 @@ impl IcApp {
                     .stderr(Stdio::piped());
                 if let Some(d) = &data {
                     ic_build::confine::child_env(&mut cmd, d);
+                }
+                for (k, v) in &envs {
+                    cmd.env(k, v);
                 }
                 hide_console(&mut cmd);
                 match cmd.spawn() {
@@ -1826,7 +2101,48 @@ impl IcApp {
             Action::CancelTrust => self.trust_prompt = None,
             Action::CheckUpdate => self.dl_check_update(),
             Action::InstallUpdate => self.dl_install_update(),
-            Action::InstallCpp => self.dl_install_cpp(),
+            Action::InstallTool(id) => self.dl_install_tool(id),
+            Action::OpenAppSettings => self.settings_open = true,
+            Action::PasteFile => {
+                let (Some(src), Some(proj)) = (self.file_clipboard.clone(), self.project.as_mut())
+                else {
+                    return;
+                };
+                let dest_dir = if proj.selected.is_dir() {
+                    proj.selected.clone()
+                } else {
+                    proj.selected
+                        .parent()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_else(|| proj.dir.clone())
+                };
+                let name = src
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let target = unique_path(&dest_dir, &name);
+                let safe = project_path_is_safe(&proj.dir, &dest_dir) && src.exists();
+                let result = if !safe {
+                    Err(std::io::Error::other("paste refused: outside the project"))
+                } else if src.is_dir() {
+                    copy_dir_recursive(&src, &target)
+                } else {
+                    fs::copy(&src, &target).map(|_| ())
+                };
+                match result {
+                    Ok(()) => {
+                        proj.files.clear();
+                        scan(&proj.dir, 0, &mut proj.files);
+                        proj.selected = target;
+                    }
+                    Err(e) => self.log.push(format!("Paste error: {e}")),
+                }
+            }
+            Action::SelectRoot => {
+                if let Some(proj) = self.project.as_mut() {
+                    proj.selected = proj.dir.clone();
+                }
+            }
             Action::ClearLog => self.log.clear(),
             Action::Check => {
                 self.save();
@@ -2018,13 +2334,11 @@ impl eframe::App for IcApp {
             self.handle_menu_drop(&dropped_files);
         } else if !dropped_files.is_empty() {
             if let Some(proj) = self.project.as_mut() {
-                let assets = proj.dir.join("assets");
-                if !assets.exists() {
-                    let _ = fs::create_dir(&assets);
-                }
+                // Файлы из ОС попадают в корень проекта
+                let assets = proj.dir.clone();
                 if !assets.is_dir() || !project_path_is_safe(&proj.dir, &assets) {
                     self.log
-                        .push("Import refused: assets folder is outside the project".into());
+                        .push("Import refused: project folder is not available".into());
                 } else {
                     for dropped in dropped_files {
                         let name = dropped
@@ -2058,6 +2372,8 @@ impl eframe::App for IcApp {
                         let result = if let Some(source) = dropped.path.as_ref() {
                             if source.is_file() {
                                 fs::copy(source, &destination).map(|_| ())
+                            } else if source.is_dir() {
+                                copy_dir_recursive(source, &destination)
                             } else {
                                 continue;
                             }
@@ -2067,9 +2383,25 @@ impl eframe::App for IcApp {
                             continue;
                         };
                         match result {
-                            Ok(()) => self
-                                .log
-                                .push(format!("Imported: {}", destination.display())),
+                            Ok(()) => {
+                                self.log
+                                    .push(format!("Imported: {}", destination.display()));
+                                // PNG, брошенный на сцену, становится спрайтом
+                                let is_png = destination
+                                    .extension()
+                                    .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+                                if self.scene_editor.open && is_png {
+                                    if let Ok(rel) = destination.strip_prefix(&proj.dir) {
+                                        let rel = rel.to_string_lossy().replace('\\', "/");
+                                        let (w, h) = png_size(&destination).unwrap_or((128, 128));
+                                        self.scene_editor.refresh_pngs();
+                                        self.scene_editor.add_sprite_with_texture(
+                                            &rel,
+                                            ((w as f32).min(256.0), (h as f32).min(256.0)),
+                                        );
+                                    }
+                                }
+                            }
                             Err(e) => self.log.push(format!("Import error: {e}")),
                         }
                     }
@@ -2123,7 +2455,7 @@ impl eframe::App for IcApp {
                     .iter()
                     .find(|l| l.matches(&name.to_string_lossy()))
             })
-            .filter(|l| l.compiler.is_some() && !l.build.is_empty())
+            .filter(|l| l.compiler.is_some() && !(l.build.is_empty() && l.run.is_empty()))
             .map(|l| (l.id.clone(), l.name.clone()));
 
         egui::TopBottomPanel::top("top")
@@ -2187,62 +2519,17 @@ impl eframe::App for IcApp {
                             custom::set_active(None);
                             changed = true;
                         }
-                        if !self.themes.is_empty() {
-                            let theme_label = self
-                                .settings
-                                .custom_theme
-                                .as_ref()
-                                .and_then(|id| self.themes.iter().find(|t| &t.id == id))
-                                .map(|t| t.name.clone())
-                                .unwrap_or_else(|| t2(lang, "Тема", "Theme").to_string());
-                            let mut picked: Option<String> = None;
-                            egui::ComboBox::from_id_source("custom_theme")
-                                .selected_text(theme_label)
-                                .show_ui(ui, |ui| {
-                                    for t in &self.themes {
-                                        if ui.selectable_label(false, &t.name).clicked() {
-                                            picked = Some(t.id.clone());
-                                        }
-                                    }
-                                });
-                            if let Some(id) = picked {
-                                self.settings.custom_theme = Some(id);
-                                self.apply_custom();
-                                changed = true;
-                            }
+                        if button(ui, t2(lang, "Настройки", "Settings"))
+                            .on_hover_text("Ctrl+,")
+                            .clicked()
+                        {
+                            action = Some(Action::OpenAppSettings);
                         }
-                        let lang_label = self
-                            .settings
-                            .custom_lang
-                            .as_ref()
-                            .and_then(|id| self.ui_langs.iter().find(|l| &l.id == id))
-                            .map(|l| l.name.clone())
-                            .unwrap_or_else(|| lang.label().to_string());
-                        let mut picked: Option<Option<String>> = None;
-                        egui::ComboBox::from_id_source("lang")
-                            .selected_text(lang_label)
-                            .show_ui(ui, |ui| {
-                                for l in Lang::ALL {
-                                    if ui.selectable_label(false, l.label()).clicked() {
-                                        self.settings.lang = l;
-                                        picked = Some(None);
-                                    }
-                                }
-                                for l in &self.ui_langs {
-                                    if ui.selectable_label(false, &l.name).clicked() {
-                                        picked = Some(Some(l.id.clone()));
-                                    }
-                                }
-                            });
-                        if let Some(choice) = picked {
-                            self.settings.custom_lang = choice;
-                            self.settings.lang_explicit = true;
-                            self.apply_custom();
-                            changed = true;
-                        }
-                        ui.label(RichText::new(tr(lang, K::Language)));
                         if project_name.is_some() {
-                            if button(ui, tr(lang, K::ProjSettings)).clicked() {
+                            if button(ui, t2(lang, "Проект", "Project"))
+                                .on_hover_text(tr(lang, K::ProjSettings))
+                                .clicked()
+                            {
                                 action = Some(Action::OpenSettings);
                             }
                             if button(ui, tr(lang, K::Save))
@@ -2332,7 +2619,7 @@ impl eframe::App for IcApp {
                 action = Some(Action::OpenScene);
             }
             if ctx.input_mut(|i| i.consume_key(command, egui::Key::Comma)) {
-                action = Some(Action::OpenSettings);
+                action = Some(Action::OpenAppSettings);
             }
             if ctx.input_mut(|i| i.consume_key(command, egui::Key::W)) {
                 if let Some(path) = self.project.as_ref().and_then(|p| p.open.clone()) {
@@ -2462,13 +2749,6 @@ impl eframe::App for IcApp {
                     });
                     ui.add_space(4.0);
                     ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.add_space(10.0);
-                        let (r, _) =
-                            ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
-                        self.icon_set.paint_root(ui.painter(), r, true, dark);
-                        ui.label(RichText::new(proj.name.to_uppercase()).strong().small());
-                    });
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
@@ -2481,6 +2761,7 @@ impl eframe::App for IcApp {
                                 &self.langs,
                                 &self.icon_set,
                                 &mut self.dragging_file,
+                                &mut self.root_collapsed,
                                 &mut action,
                             );
                             if ui.input(|i| i.pointer.any_released()) {
@@ -2670,7 +2951,6 @@ impl eframe::App for IcApp {
                 let n = self.name.trim();
                 !n.is_empty() && !n.contains(['/', '\\'])
             };
-            let cpp_ready = downloads_ui::cpp_installed();
             let exists =
                 name_ok && is_project_dir(&resolve_dir(&self.location).join(self.name.trim()));
             if self.location != self.found_for {
@@ -2794,13 +3074,7 @@ impl eframe::App for IcApp {
                                     egui::vec2(420.0, 0.0),
                                     egui::Layout::top_down(egui::Align::Min),
                                     |ui| {
-                                        downloads_ui::downloads_ui(
-                                            ui,
-                                            &self.dl,
-                                            cpp_ready,
-                                            lang,
-                                            &mut action,
-                                        );
+                                        downloads_ui::downloads_ui(ui, &self.dl, lang, &mut action);
                                     },
                                 );
                             },
@@ -2809,6 +3083,11 @@ impl eframe::App for IcApp {
                 });
         }
 
+        let icon_choices: Vec<String> = self
+            .project
+            .as_ref()
+            .map(|p| scene_model::list_pngs(&p.dir))
+            .unwrap_or_default();
         if let Some(draft) = self.settings_draft.as_mut() {
             let mut open = true;
             egui::Window::new(tr(lang, K::ProjSettings))
@@ -2841,6 +3120,33 @@ impl eframe::App for IcApp {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut draft.s.title)
                                         .desired_width(f32::INFINITY),
+                                );
+                                ui.add_space(8.0);
+                                ui.label(t2(lang, "Значок игры (PNG)", "Game icon (PNG)"));
+                                egui::ComboBox::from_id_source("project_icon")
+                                    .selected_text(if draft.s.icon.is_empty() {
+                                        "—"
+                                    } else {
+                                        draft.s.icon.as_str()
+                                    })
+                                    .width(220.0)
+                                    .show_ui(ui, |ui| {
+                                        if ui.selectable_label(draft.s.icon.is_empty(), "—").clicked() {
+                                            draft.s.icon.clear();
+                                        }
+                                        for png in &icon_choices {
+                                            if ui.selectable_label(&draft.s.icon == png, png).clicked() {
+                                                draft.s.icon = png.clone();
+                                            }
+                                        }
+                                    });
+                                ui.label(
+                                    RichText::new(t2(
+                                        lang,
+                                        "Перетащи PNG в окно проекта, потом выбери здесь. Значок виден в окне игры, на Windows ещё и в проводнике.",
+                                        "Drop a PNG into the project window, then pick it here. Shown in the game window and, on Windows, in the file explorer.",
+                                    ))
+                                    .small(),
                                 );
                                 ui.add_space(8.0);
                                 ui.label(RichText::new(tr(lang, K::SetNameHint)).small());
@@ -3210,7 +3516,11 @@ impl eframe::App for IcApp {
                     .as_ref()
                     .map(|c| c.display().to_string())
                     .unwrap_or_default();
-                let command = l.build.join(" ");
+                let command = if l.build.is_empty() {
+                    l.run.join(" ")
+                } else {
+                    l.build.join(" ")
+                };
                 egui::Window::new(t2(lang, "Запустить компилятор?", "Run the compiler?"))
                     .collapsible(false)
                     .resizable(false)
@@ -3243,6 +3553,54 @@ impl eframe::App for IcApp {
                 self.trust_prompt = None;
             }
         }
+        // Анимированные «призраки» перетаскиваемых файлов, узлов и модулей
+        if let Some(src) = self.dragging_file.clone() {
+            let name = src
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let tex = if src.is_dir() {
+                self.icon_set.folder_texture(&name)
+            } else {
+                self.icon_set.file_texture(&name, dark)
+            };
+            dragfx::ghost(ctx, "file", &name, tex, p.panel, p.accent);
+        } else {
+            dragfx::end(ctx, "file");
+        }
+        if let Some(i) = self.scene_editor.tree_drag {
+            if let Some(node) = self.scene_editor.nodes.get(i) {
+                dragfx::ghost(ctx, "node", &node.name, None, p.panel, p.accent);
+            }
+        } else {
+            dragfx::end(ctx, "node");
+        }
+        if let Some(g) = self.scene_editor.module_drag {
+            dragfx::ghost(
+                ctx,
+                "module",
+                &generator_label(lang, g),
+                None,
+                p.panel,
+                p.accent,
+            );
+            if ctx.input(|i| i.pointer.any_released()) {
+                let over = ctx
+                    .input(|i| i.pointer.latest_pos())
+                    .zip(self.scene_editor.canvas_rect)
+                    .is_some_and(|(pos, rect)| rect.contains(pos));
+                self.scene_editor.module_drag = None;
+                if over {
+                    action = Some(Action::AddGenerator(g));
+                }
+            }
+        } else {
+            dragfx::end(ctx, "module");
+        }
+        if self.settings_open && self.app_settings_window(ctx) {
+            setup_style(ctx, self.settings.dark);
+            self.settings.save();
+        }
         if self.scene_editor.open {
             scene_ui::scene_keys(ctx, &mut self.scene_editor);
             let busy = ctx.input(|i| i.pointer.any_down()) || ctx.wants_keyboard_input();
@@ -3259,6 +3617,21 @@ impl eframe::App for IcApp {
                     ));
                 }
             }
+        } else if !ctx.wants_keyboard_input()
+            && self.project.is_some()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::C))
+        {
+            // Ctrl+C: запомнить выбранный файл
+            if let Some(proj) = &self.project {
+                if proj.selected != proj.dir {
+                    self.file_clipboard = Some(proj.selected.clone());
+                }
+            }
+        } else if !ctx.wants_keyboard_input()
+            && self.file_clipboard.is_some()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::V))
+        {
+            action = Some(Action::PasteFile);
         } else if !ctx.wants_keyboard_input()
             && self.project.is_some()
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete))

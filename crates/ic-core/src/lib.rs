@@ -10,6 +10,8 @@ pub struct Config {
     pub clear_color: [f64; 4],
     pub width: u32,
     pub height: u32,
+    // Значок окна: RGBA, ширина, высота
+    pub icon: Option<(Vec<u8>, u32, u32)>,
 }
 
 impl Default for Config {
@@ -21,6 +23,7 @@ impl Default for Config {
             clear_color: [0.02, 0.02, 0.05, 1.0],
             width: 1280,
             height: 720,
+            icon: None,
         }
     }
 }
@@ -69,6 +72,11 @@ impl Key {
 pub struct Input {
     down: [bool; KEY_COUNT],
     pressed: [bool; KEY_COUNT],
+    // Мышь: позиция в пикселях окна (0,0 — левый верх), кнопки: левая, правая, средняя
+    pub mouse_pos: Vec2,
+    pub mouse_down: [bool; 3],
+    pub mouse_pressed: [bool; 3],
+    pub wheel: f32,
 }
 
 impl Input {
@@ -85,8 +93,18 @@ impl Input {
         }
         self.down[i] = is_down;
     }
+    pub fn set_mouse_button(&mut self, button: usize, is_down: bool) {
+        if button < 3 {
+            if is_down && !self.mouse_down[button] {
+                self.mouse_pressed[button] = true;
+            }
+            self.mouse_down[button] = is_down;
+        }
+    }
     pub fn end_frame(&mut self) {
         self.pressed = [false; KEY_COUNT];
+        self.mouse_pressed = [false; 3];
+        self.wheel = 0.0;
     }
 }
 
@@ -96,6 +114,15 @@ pub struct Sprite {
     pub size: Vec2,
     pub rotation: f32,
     pub color: [f32; 4],
+    // Область атласа (u0, v0, u1, v1); нули — сплошной цвет
+    pub uv: [f32; 4],
+}
+
+// Картинка-атлас: все изображения и буквы игры в одной текстуре (RGBA)
+pub struct AtlasImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -116,6 +143,7 @@ impl DrawList {
             size,
             rotation: 0.0,
             color,
+            uv: [0.0; 4],
         });
     }
 }
@@ -151,6 +179,10 @@ impl Context {
 }
 
 pub trait Game {
+    // Атлас с картинками и шрифтом; рендерер берёт его один раз при старте
+    fn atlas(&mut self) -> Option<AtlasImage> {
+        None
+    }
     fn init(&mut self, _ctx: &mut Context) {}
     fn fixed_update(&mut self, _ctx: &mut Context) {}
     fn update(&mut self, ctx: &mut Context);

@@ -105,6 +105,26 @@ impl IconSet {
         "document"
     }
 
+    // Текстуры значков для «призрака» при перетаскивании
+    pub fn file_texture(&self, name: &str, dark: bool) -> Option<egui::TextureId> {
+        let key = self.file_key(name);
+        let name = if !dark && self.light.contains(key) {
+            format!("{key}_light")
+        } else {
+            key.to_string()
+        };
+        self.texture(&name).map(|t| t.id())
+    }
+
+    pub fn folder_texture(&self, name: &str) -> Option<egui::TextureId> {
+        let base = self
+            .dir
+            .get(name.to_ascii_lowercase().as_str())
+            .copied()
+            .unwrap_or("folder-base");
+        self.texture(base).map(|t| t.id())
+    }
+
     pub fn paint_file(&self, painter: &egui::Painter, rect: egui::Rect, name: &str, dark: bool) {
         self.draw(painter, rect, self.file_key(name), dark);
     }

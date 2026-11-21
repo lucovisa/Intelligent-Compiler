@@ -15,6 +15,8 @@ pub struct Language {
     pub compiler: Option<PathBuf>,
     pub build: Vec<String>,
     pub run: Vec<String>,
+    // Переменные окружения для сборки и запуска: ["КЛЮЧ=значение"]
+    pub env: Vec<(String, String)>,
     pub source: PathBuf,
 }
 
@@ -109,6 +111,16 @@ pub fn parse(text: &str, source: &Path) -> Result<Language, String> {
             }
             "build" => lang.build = parse_list(value).ok_or_else(bad)?,
             "run" => lang.run = parse_list(value).ok_or_else(bad)?,
+            "env" => {
+                lang.env = parse_list(value)
+                    .ok_or_else(bad)?
+                    .into_iter()
+                    .filter_map(|e| {
+                        e.split_once('=')
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                    })
+                    .collect();
+            }
             _ => {}
         }
     }

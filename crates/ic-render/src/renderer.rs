@@ -1,4 +1,4 @@
-use ic_core::{Camera2D, Sprite};
+use ic_core::{AtlasImage, Camera2D, Sprite};
 use std::sync::Arc;
 use winit::window::Window;
 
@@ -9,14 +9,16 @@ struct Instance {
     size: [f32; 2],
     color: [f32; 4],
     rot: f32,
+    uv: [f32; 4],
     _pad: [f32; 3],
 }
 
-const INSTANCE_ATTRS: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
+const INSTANCE_ATTRS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
     0 => Float32x2,
     1 => Float32x2,
     2 => Float32x4,
     3 => Float32,
+    4 => Float32x4,
 ];
 
 pub struct Renderer {
@@ -27,6 +29,9 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     cam_buf: wgpu::Buffer,
     cam_bg: wgpu::BindGroup,
+    atlas_bg: wgpu::BindGroup,
+    // Куда смотрит сплошной цвет в атласе
+    white_uv: [f32; 4],
     inst_buf: wgpu::Buffer,
     inst_cap: usize,
     scratch: Vec<Instance>,
@@ -42,7 +47,7 @@ fn make_inst_buf(device: &wgpu::Device, cap: usize) -> wgpu::Buffer {
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>) -> Self {
+    pub fn new(window: Arc<Window>, atlas: Option<AtlasImage>) -> Self {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window).expect("create surface");
@@ -117,9 +122,96 @@ impl Renderer {
             }],
         });
 
+        // Атлас: картинки и буквы; без атласа — один белый пиксель
+        let atlas = atlas.unwrap_or(AtlasImage {
+            width: 2,
+            height: 2,
+            rgba: vec![255; 16],
+        });
+        let atlas_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ic atlas"),
+            size: wgpu::Extent3d {
+                width: atlas.width,
+                height: atlas.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &atlas_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &atlas.rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * atlas.width),
+                rows_per_image: Some(atlas.height),
+            },
+            wgpu::Extent3d {
+                width: atlas.width,
+                height: atlas.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let atlas_view = atlas_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let atlas_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("atlas bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let atlas_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("atlas bg"),
+            layout: &atlas_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        let white_uv = [
+            0.5 / atlas.width as f32,
+            0.5 / atlas.height as f32,
+            0.5 / atlas.width as f32,
+            0.5 / atlas.height as f32,
+        ];
+
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sprite layout"),
-            bind_group_layouts: &[&bgl],
+            bind_group_layouts: &[&bgl, &atlas_bgl],
             push_constant_ranges: &[],
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -164,6 +256,8 @@ impl Renderer {
             pipeline,
             cam_buf,
             cam_bg,
+            atlas_bg,
+            white_uv,
             inst_buf,
             inst_cap,
             scratch: Vec::new(),
@@ -195,6 +289,11 @@ impl Renderer {
             size: [s.size.x, s.size.y],
             color: s.color,
             rot: s.rotation,
+            uv: if s.uv == [0.0; 4] {
+                self.white_uv
+            } else {
+                s.uv
+            },
             _pad: [0.0; 3],
         }));
         if self.scratch.len() > self.inst_cap {
@@ -246,6 +345,7 @@ impl Renderer {
             if !self.scratch.is_empty() {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.cam_bg, &[]);
+                pass.set_bind_group(1, &self.atlas_bg, &[]);
                 pass.set_vertex_buffer(0, self.inst_buf.slice(..));
                 pass.draw(0..6, 0..self.scratch.len() as u32);
             }
