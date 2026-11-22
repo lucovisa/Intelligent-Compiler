@@ -2,11 +2,13 @@ mod custom;
 mod downloads_ui;
 mod dragfx;
 mod editing;
+mod git_ui;
 mod hotkeys;
 mod i18n;
 mod icons;
 mod scene_model;
 mod scene_ui;
+mod ui_color;
 use scene_model::{SceneEditor, SceneNode};
 
 use eframe::egui::{self, Color32, FontId, Margin, RichText, Rounding, Stroke};
@@ -166,6 +168,8 @@ struct Settings {
     custom_theme: Option<String>,
     custom_lang: Option<String>,
     auto_update: bool,
+    git_name: String,
+    git_email: String,
 }
 
 impl Settings {
@@ -189,6 +193,8 @@ impl Settings {
             custom_theme: None,
             custom_lang: None,
             auto_update: false,
+            git_name: String::new(),
+            git_email: String::new(),
         };
         let mut saved_lang = None;
         if let Some(path) = Self::path() {
@@ -220,6 +226,8 @@ impl Settings {
                             ("recent", v) if !v.is_empty() => s.recent.push(v.to_string()),
                             ("trust", v) if !v.is_empty() => s.trusted.push(v.to_string()),
                             ("auto_update", v) => s.auto_update = v == "1",
+                            ("git_name", v) => s.git_name = v.to_string(),
+                            ("git_email", v) => s.git_email = v.to_string(),
                             _ => {}
                         }
                     }
@@ -259,6 +267,10 @@ impl Settings {
             out.push_str(&format!("trust={t}\n"));
         }
         out.push_str(&format!("auto_update={}\n", u8::from(self.auto_update)));
+        out.push_str(&format!(
+            "git_name={}\ngit_email={}\n",
+            self.git_name, self.git_email
+        ));
         if let Some(path) = Self::path() {
             let _ = fs::write(path, out);
         }
@@ -370,7 +382,7 @@ fn setup_style(ctx: &egui::Context, dark: bool) {
     v.extreme_bg_color = p.editor;
     v.faint_bg_color = p.idle;
     v.selection.bg_fill = p.accent;
-    v.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
+    v.selection.stroke = Stroke::new(1.0_f32, ui_color::on(p.accent));
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.border);
     v.widgets.inactive.bg_fill = p.idle;
     v.widgets.inactive.weak_bg_fill = p.idle;
@@ -416,7 +428,7 @@ fn primary_on(ui: &mut egui::Ui, on: bool, text: &str) -> egui::Response {
     let accent = palette(ui.visuals().dark_mode).accent;
     ui.add_enabled(
         on,
-        egui::Button::new(RichText::new(text).color(Color32::WHITE)).fill(accent),
+        egui::Button::new(RichText::new(text).color(ui_color::on(accent))).fill(accent),
     )
 }
 
@@ -948,7 +960,11 @@ fn explorer_rows(
             }
             let x = base_x + f.depth as f32 * indent;
             let cy = rect.center().y;
-            let color = if selected { Color32::WHITE } else { text_color };
+            let color = if selected {
+                ui_color::on(ui_color::over(pal.accent, 0.5, pal.panel))
+            } else {
+                text_color
+            };
             if f.is_dir {
                 let c = egui::pos2(x + 6.0, cy);
                 let pts = if collapsed {
@@ -1208,6 +1224,7 @@ struct IcApp {
     tx: Sender<String>,
     rx: Receiver<String>,
     dragging_file: Option<PathBuf>,
+    git: git_ui::GitState,
     quick_open: bool,
     quick_filter: String,
     command_palette: bool,
@@ -1245,6 +1262,7 @@ impl IcApp {
             .to_string_lossy()
             .into_owned();
         let (dl_tx, dl_rx) = std::sync::mpsc::channel();
+        let git = git_ui::GitState::new(settings.git_name.clone(), settings.git_email.clone());
         let mut app = Self {
             settings,
             name: "my_game".into(),
@@ -1260,6 +1278,7 @@ impl IcApp {
             tx,
             rx,
             dragging_file: None,
+            git,
             quick_open: false,
             quick_filter: String::new(),
             command_palette: false,
@@ -1622,17 +1641,17 @@ impl IcApp {
                     egui::ComboBox::from_id_source("settings_theme")
                         .selected_text(current)
                         .show_ui(ui, |ui| {
-                            if ui.selectable_label(false, t2(lang, "Системная", "System")).clicked() {
+                            if ui_color::sel_label(ui, false, t2(lang, "Системная", "System")).clicked() {
                                 picked = Some((true, system_prefers_dark(), None));
                             }
-                            if ui.selectable_label(false, t2(lang, "Тёмная", "Dark")).clicked() {
+                            if ui_color::sel_label(ui, false, t2(lang, "Тёмная", "Dark")).clicked() {
                                 picked = Some((false, true, None));
                             }
-                            if ui.selectable_label(false, t2(lang, "Светлая", "Light")).clicked() {
+                            if ui_color::sel_label(ui, false, t2(lang, "Светлая", "Light")).clicked() {
                                 picked = Some((false, false, None));
                             }
                             for t in &self.themes {
-                                if ui.selectable_label(false, &t.name).clicked() {
+                                if ui_color::sel_label(ui, false, &t.name).clicked() {
                                     picked = Some((false, t.dark, Some(t.id.clone())));
                                 }
                             }
@@ -1660,13 +1679,13 @@ impl IcApp {
                         .selected_text(label)
                         .show_ui(ui, |ui| {
                             for l in Lang::ALL {
-                                if ui.selectable_label(false, l.label()).clicked() {
+                                if ui_color::sel_label(ui, false, l.label()).clicked() {
                                     self.settings.lang = l;
                                     picked = Some(None);
                                 }
                             }
                             for l in &self.ui_langs {
-                                if ui.selectable_label(false, &l.name).clicked() {
+                                if ui_color::sel_label(ui, false, &l.name).clicked() {
                                     picked = Some(Some(l.id.clone()));
                                 }
                             }
@@ -2297,6 +2316,34 @@ impl eframe::App for IcApp {
         if self.help_open {
             hotkeys::show(ctx, &mut self.help_open, self.settings.lang);
         }
+        if self.project.is_some()
+            && ctx.input_mut(|i| {
+                i.consume_key(
+                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                    egui::Key::G,
+                )
+            })
+        {
+            self.git.open = !self.git.open;
+        }
+        if self.git.open {
+            if let Some(proj) = &self.project {
+                git_ui::show(
+                    ctx,
+                    &mut self.git,
+                    &proj.dir,
+                    self.settings.lang,
+                    &self.tx,
+                    self.settings.dark,
+                );
+            }
+            if self.git.identity_dirty {
+                self.git.identity_dirty = false;
+                self.settings.git_name = self.git.name.clone();
+                self.settings.git_email = self.git.email.clone();
+                self.settings.save();
+            }
+        }
         if self.scene_editor.open {
             self.scene_editor.begin_frame();
         }
@@ -2491,6 +2538,9 @@ impl eframe::App for IcApp {
                             .clicked()
                         {
                             action = Some(Action::Build);
+                        }
+                        if button(ui, "Git").on_hover_text("Ctrl+Shift+G").clicked() {
+                            self.git.open = !self.git.open;
                         }
                         if let Some((id, name)) = &run_lang {
                             if primary_button(
@@ -2796,14 +2846,16 @@ impl eframe::App for IcApp {
                     };
                     // Переключатель: скрипт или сцена
                     ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(!self.scene_editor.open, t2(lang, "Скрипт", "Script"))
-                            .clicked()
+                        if ui_color::sel_label(
+                            ui,
+                            !self.scene_editor.open,
+                            t2(lang, "Скрипт", "Script"),
+                        )
+                        .clicked()
                         {
                             action = Some(Action::CloseScene);
                         }
-                        if ui
-                            .selectable_label(self.scene_editor.open, tr(lang, K::SceneEditor))
+                        if ui_color::sel_label(ui, self.scene_editor.open, tr(lang, K::SceneEditor))
                             .clicked()
                         {
                             action = Some(Action::OpenScene);
@@ -2844,7 +2896,7 @@ impl eframe::App for IcApp {
                                         .display()
                                         .to_string();
                                     let active = proj.open.as_ref() == Some(&tab);
-                                    if ui.selectable_label(active, label).clicked() {
+                                    if ui_color::sel_label(ui, active, label).clicked() {
                                         action = Some(Action::SelectTab(tab.clone()));
                                     }
                                     if ui
@@ -3045,12 +3097,12 @@ impl eframe::App for IcApp {
                                             ui.add_space(10.0);
                                             ui.label(RichText::new(tr(lang, K::FoundList)).small());
                                             for n in &self.found {
-                                                if ui
-                                                    .selectable_label(
-                                                        n.as_str() == self.name.trim(),
-                                                        n.as_str(),
-                                                    )
-                                                    .clicked()
+                                                if ui_color::sel_label(
+                                                    ui,
+                                                    n.as_str() == self.name.trim(),
+                                                    n.as_str(),
+                                                )
+                                                .clicked()
                                                 {
                                                     action = Some(Action::PickProject(n.clone()));
                                                 }
@@ -3131,11 +3183,11 @@ impl eframe::App for IcApp {
                                     })
                                     .width(220.0)
                                     .show_ui(ui, |ui| {
-                                        if ui.selectable_label(draft.s.icon.is_empty(), "—").clicked() {
+                                        if ui_color::sel_label(ui, draft.s.icon.is_empty(), "—").clicked() {
                                             draft.s.icon.clear();
                                         }
                                         for png in &icon_choices {
-                                            if ui.selectable_label(&draft.s.icon == png, png).clicked() {
+                                            if ui_color::sel_label(ui, &draft.s.icon == png, png).clicked() {
                                                 draft.s.icon = png.clone();
                                             }
                                         }
@@ -3190,11 +3242,15 @@ impl eframe::App for IcApp {
                                     .width(ui.available_width())
                                     .show_ui(ui, |ui| {
                                         for t in TARGETS {
-                                            ui.selectable_value(
-                                                &mut draft.s.target,
-                                                t.to_string(),
+                                            if ui_color::sel_label(
+                                                ui,
+                                                draft.s.target == *t,
                                                 target_label(lang, t),
-                                            );
+                                            )
+                                            .clicked()
+                                            {
+                                                draft.s.target = t.to_string();
+                                            }
                                         }
                                     });
                                 ui.add_space(6.0);
@@ -3267,9 +3323,12 @@ impl eframe::App for IcApp {
                         for (path, line, text) in results {
                             let relative =
                                 path.strip_prefix(&project.dir).unwrap_or(&path).display();
-                            if ui
-                                .selectable_label(false, format!("{}:{}  {}", relative, line, text))
-                                .clicked()
+                            if ui_color::sel_label(
+                                ui,
+                                false,
+                                format!("{}:{}  {}", relative, line, text),
+                            )
+                            .clicked()
                             {
                                 action = Some(Action::SelectTab(path));
                                 self.project_search = false;
@@ -3320,9 +3379,12 @@ impl eframe::App for IcApp {
                             .max_height(360.0)
                             .show(ui, |ui| {
                                 for (_, label, path) in ranked.into_iter().take(100) {
-                                    if ui
-                                        .selectable_label(proj.open.as_ref() == Some(&path), label)
-                                        .clicked()
+                                    if ui_color::sel_label(
+                                        ui,
+                                        proj.open.as_ref() == Some(&path),
+                                        label,
+                                    )
+                                    .clicked()
                                     {
                                         action = Some(Action::SelectTab(path));
                                         self.quick_open = false;
@@ -3368,7 +3430,7 @@ impl eframe::App for IcApp {
                         {
                             continue;
                         }
-                        if ui.selectable_label(false, label).clicked() {
+                        if ui_color::sel_label(ui, false, label).clicked() {
                             action = Some(match command {
                                 "save" => Action::Save,
                                 "run" => Action::Run,

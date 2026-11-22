@@ -10,6 +10,7 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("Ctrl+Shift+P", "Палитра команд", "Command palette"),
     ("Ctrl+F", "Поиск по проекту", "Search in project"),
     ("Ctrl+,", "Настройки программы", "Settings"),
+    ("Ctrl+Shift+G", "Панель Git", "Git panel"),
     ("F1", "Эта подсказка", "This help"),
     ("", "Файлы и вкладки", "Files and tabs"),
     ("Ctrl+N", "Новый файл", "New file"),

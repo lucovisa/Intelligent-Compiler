@@ -219,7 +219,8 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
                             scene.renaming = None;
                         }
                     } else {
-                        let resp = ui.selectable_label(
+                        let resp = ui_color::sel_label(
+                            ui,
                             scene.is_selected(index),
                             format!("{name}  ·  {kind}"),
                         );
@@ -424,7 +425,9 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
                 for (group, _, kinds) in NODE_GROUPS {
                     ui.label(RichText::new(*group).small());
                     for option in *kinds {
-                        ui.selectable_value(&mut kind, option.to_string(), *option);
+                        if ui_color::sel_label(ui, kind == **option, *option).clicked() {
+                            kind = option.to_string();
+                        }
                     }
                 }
             });
@@ -492,11 +495,11 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
             })
             .width(170.0)
             .show_ui(ui, |ui| {
-                if ui.selectable_label(node.texture.is_empty(), "—").clicked() {
+                if ui_color::sel_label(ui, node.texture.is_empty(), "—").clicked() {
                     node.texture.clear();
                 }
                 for png in &scene.pngs {
-                    if ui.selectable_label(&node.texture == png, png).clicked() {
+                    if ui_color::sel_label(ui, &node.texture == png, png).clicked() {
                         node.texture = png.clone();
                     }
                 }
