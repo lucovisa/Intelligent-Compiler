@@ -13,7 +13,7 @@ use scene_model::{SceneEditor, SceneNode};
 
 use eframe::egui::{self, Color32, FontId, Margin, RichText, Rounding, Stroke};
 use i18n::{tr, Lang, K};
-use ic_build::scaffold::{self, Dimension, Generator, Kind, NewProject};
+use ic_build::scaffold::{self, Dimension, Kind, NewProject};
 use ic_build::ProjectSettings;
 use std::{
     collections::{HashMap, HashSet},
@@ -688,11 +688,47 @@ struct Prompt {
     focus: bool,
 }
 
+// Строка ввода имени нового файла или папки прямо в проводнике
+struct InlineNew {
+    parent: PathBuf,
+    is_dir: bool,
+    text: String,
+    fresh: bool,
+}
+
+fn inline_row(
+    ui: &mut egui::Ui,
+    child_depth: usize,
+    inline: &mut InlineNew,
+    action: &mut Option<Action>,
+) {
+    let pad = 12.0 + 12.0 * (child_depth as f32 + 1.0) + 18.0;
+    ui.horizontal(|ui| {
+        ui.add_space(pad);
+        let edit = ui.add(
+            egui::TextEdit::singleline(&mut inline.text)
+                .desired_width((ui.available_width() - 8.0).max(60.0)),
+        );
+        if inline.fresh {
+            edit.request_focus();
+            inline.fresh = false;
+        }
+        if edit.lost_focus() {
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            *action = if enter || (!esc && !inline.text.trim().is_empty()) {
+                Some(Action::CommitInline)
+            } else {
+                Some(Action::CancelInline)
+            };
+        }
+    });
+}
+
 struct NewDialog {
     kind: Kind,
     dimension: Dimension,
     label: String,
-    gens: [bool; 4],
     default_code: bool,
 }
 
@@ -702,18 +738,8 @@ impl Default for NewDialog {
             kind: Kind::Game,
             dimension: Dimension::D2,
             label: String::new(),
-            gens: [false; 4],
             default_code: true,
         }
-    }
-}
-
-fn generator_label(lang: Lang, g: Generator) -> &'static str {
-    match g {
-        Generator::Scene => tr(lang, K::GenScene),
-        Generator::Fps => tr(lang, K::GenFps),
-        Generator::Physics => tr(lang, K::GenPhysics),
-        Generator::Camera => tr(lang, K::GenCamera),
     }
 }
 
@@ -849,6 +875,8 @@ fn explorer_rows(
     icon_set: &icons::IconSet,
     dragging_file: &mut Option<PathBuf>,
     root_collapsed: &mut bool,
+    inline: &mut Option<InlineNew>,
+    has_clipboard: bool,
     action: &mut Option<Action>,
 ) {
     let pal = palette(dark);
@@ -924,6 +952,9 @@ fn explorer_rows(
     }
     if *root_collapsed {
         return;
+    }
+    if let Some(i) = inline.as_mut().filter(|i| i.parent == proj.dir) {
+        inline_row(ui, 0, i, action);
     }
 
     for f in &proj.files {
@@ -1056,6 +1087,21 @@ fn explorer_rows(
                 ui.close_menu();
             }
             ui.separator();
+            if ui.button(t2(lang, "Копировать", "Copy")).clicked() {
+                *action = Some(Action::CopyPath(f.path.clone()));
+                ui.close_menu();
+            }
+            if ui
+                .add_enabled(
+                    has_clipboard,
+                    egui::Button::new(t2(lang, "Вставить", "Paste")),
+                )
+                .clicked()
+            {
+                *action = Some(Action::PasteAt(base.clone()));
+                ui.close_menu();
+            }
+            ui.separator();
             if ui.button(tr(lang, K::Rename)).clicked() {
                 *action = Some(Action::PromptOpen(PromptKind::Rename, f.path.clone()));
                 ui.close_menu();
@@ -1065,6 +1111,11 @@ fn explorer_rows(
                 ui.close_menu();
             }
         });
+        if f.is_dir && !collapsed {
+            if let Some(i) = inline.as_mut().filter(|i| i.parent == f.path) {
+                inline_row(ui, f.depth + 1, i, action);
+            }
+        }
     }
 }
 
@@ -1109,6 +1160,7 @@ struct Project {
     note: Option<String>,
     collapsed: HashSet<PathBuf>,
     selected: PathBuf,
+    is_game: bool,
 }
 
 fn load_file(proj: &mut Project, path: PathBuf, lang: Lang) {
@@ -1191,7 +1243,10 @@ enum Action {
     PickProject(String),
     ConfirmCreate,
     CancelCreate,
-    AddGenerator(Generator),
+    CommitInline,
+    CancelInline,
+    CopyPath(PathBuf),
+    PasteAt(PathBuf),
     PromptOpen(PromptKind, PathBuf),
     PromptOk,
     PromptCancel,
@@ -1224,6 +1279,7 @@ struct IcApp {
     tx: Sender<String>,
     rx: Receiver<String>,
     dragging_file: Option<PathBuf>,
+    inline_new: Option<InlineNew>,
     git: git_ui::GitState,
     quick_open: bool,
     quick_filter: String,
@@ -1278,6 +1334,7 @@ impl IcApp {
             tx,
             rx,
             dragging_file: None,
+            inline_new: None,
             git,
             quick_open: false,
             quick_filter: String::new(),
@@ -1293,7 +1350,7 @@ impl IcApp {
             project_search_query: String::new(),
             search_current_file: false,
             scene_editor: SceneEditor::default(),
-            window_title: "IC".into(),
+            window_title: "Intelligent Compiler".into(),
             ctx: cc.egui_ctx.clone(),
             langs: LangSet::default(),
             icon_set: icons::IconSet::new(&cc.egui_ctx),
@@ -1331,21 +1388,10 @@ impl IcApp {
             return;
         };
         let dir = resolve_dir(&self.location).join(self.name.trim());
-        let generators: Vec<Generator> = if d.kind == Kind::Game {
-            Generator::ALL
-                .iter()
-                .zip(d.gens)
-                .filter(|(_, on)| *on)
-                .map(|(g, _)| *g)
-                .collect()
-        } else {
-            Vec::new()
-        };
         let opts = NewProject {
             kind: d.kind,
             dimension: d.dimension,
             label: d.label.trim().to_string(),
-            generators,
             default_code: d.default_code,
         };
         match scaffold::create(&dir, &opts) {
@@ -1492,6 +1538,7 @@ impl IcApp {
             note: None,
             collapsed: HashSet::new(),
             selected: dir.clone(),
+            is_game: ProjectSettings::load(&dir).0.kind != "app",
         };
         if dir.join("main.lua").is_file() {
             load_file(&mut proj, dir.join("main.lua"), lang);
@@ -1512,6 +1559,13 @@ impl IcApp {
             if !project_path_is_safe(&p.dir, &path) {
                 self.log
                     .push("open refused: file is outside the project".into());
+                return;
+            }
+            if p.is_game && path.extension().is_some_and(|e| e == "ic") {
+                let dir = p.dir.clone();
+                p.selected = path.clone();
+                self.scene_editor.open_scene(&dir, &path);
+                self.scene_editor.open = self.scene_editor.path.is_some();
                 return;
             }
             load_file(p, path, lang);
@@ -2083,7 +2137,12 @@ impl IcApp {
             Action::CloseTab(p) => self.close_tab(p),
             Action::MovePath(source, destination) => self.move_project_file(source, destination),
             Action::OpenScene => {
-                if let Some(dir) = self.project.as_ref().map(|p| p.dir.clone()) {
+                if let Some(dir) = self
+                    .project
+                    .as_ref()
+                    .filter(|p| p.is_game)
+                    .map(|p| p.dir.clone())
+                {
                     if self.scene_editor.path.is_none() {
                         self.scene_editor.open_project(&dir);
                     }
@@ -2248,6 +2307,11 @@ impl IcApp {
                     self.settings.push_recent(&new);
                     self.settings.save();
                 }
+                proj.is_game = draft.s.kind != "app";
+                if !proj.is_game {
+                    self.scene_editor.open = false;
+                }
+                self.scene_editor.project_dir = Some(proj.dir.clone());
                 proj.files.clear();
                 scan(&proj.dir, 0, &mut proj.files);
                 let toml = proj.dir.join(ProjectSettings::FILE);
@@ -2260,22 +2324,50 @@ impl IcApp {
             Action::PickProject(n) => self.name = n,
             Action::ConfirmCreate => self.create_project(),
             Action::CancelCreate => self.new_dialog = None,
-            Action::AddGenerator(g) => {
-                let lang = self.settings.lang;
+            Action::CancelInline => self.inline_new = None,
+            Action::CopyPath(p) => self.file_clipboard = Some(p),
+            Action::PasteAt(dir) => {
                 if let Some(proj) = self.project.as_mut() {
-                    match scaffold::add_generator(&proj.dir, g) {
-                        Ok(file) => {
-                            self.log.push(format!(
-                                "{}: {file} — {}",
-                                tr(lang, K::GenAdded),
-                                g.usage()
-                            ));
-                            proj.files.clear();
-                            scan(&proj.dir, 0, &mut proj.files);
+                    proj.selected = dir;
+                }
+                self.handle(ctx, Action::PasteFile);
+            }
+            Action::CommitInline => {
+                if let Some(i) = self.inline_new.take() {
+                    let kind = if i.is_dir {
+                        PromptKind::NewFolder
+                    } else {
+                        PromptKind::NewFile
+                    };
+                    self.prompt = Some(Prompt {
+                        kind,
+                        path: i.parent.clone(),
+                        text: i.text.clone(),
+                        error: None,
+                        focus: false,
+                    });
+                    self.prompt_ok();
+                    if let Some(pr) = self.prompt.take() {
+                        if let Some(e) = pr.error {
+                            self.log.push(e);
                         }
-                        Err(e) => self.log.push(e),
+                        self.inline_new = Some(InlineNew { fresh: true, ..i });
                     }
                 }
+            }
+            Action::PromptOpen(kind, path)
+                if matches!(kind, PromptKind::NewFile | PromptKind::NewFolder) =>
+            {
+                if let Some(proj) = self.project.as_mut() {
+                    proj.collapsed.remove(&path);
+                }
+                self.root_collapsed = false;
+                self.inline_new = Some(InlineNew {
+                    parent: path,
+                    is_dir: kind == PromptKind::NewFolder,
+                    text: String::new(),
+                    fresh: true,
+                });
             }
             Action::PromptOpen(kind, path) => {
                 let text = if kind == PromptKind::Rename {
@@ -2468,8 +2560,8 @@ impl eframe::App for IcApp {
         let window_title = self
             .project
             .as_ref()
-            .map(|project| format!("IC - \"{}\"", project.name))
-            .unwrap_or_else(|| "IC".to_string());
+            .map(|project| format!("Intelligent Compiler - \"{}\"", project.name))
+            .unwrap_or_else(|| "Intelligent Compiler".to_string());
         if self.window_title != window_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(window_title.clone()));
             self.window_title = window_title;
@@ -2576,7 +2668,7 @@ impl eframe::App for IcApp {
                             action = Some(Action::OpenAppSettings);
                         }
                         if project_name.is_some() {
-                            if button(ui, t2(lang, "Проект", "Project"))
+                            if button(ui, t2(lang, "Настройки проекта", "Project settings"))
                                 .on_hover_text(tr(lang, K::ProjSettings))
                                 .clicked()
                             {
@@ -2763,15 +2855,16 @@ impl eframe::App for IcApp {
                         ui.label(RichText::new(tr(lang, K::Explorer)).small().strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(6.0);
-                            if icons::tool_button(
-                                ui,
-                                &self.icon_set,
-                                icons::Tool::NewScene,
-                                tr(lang, K::GenScene),
-                            )
-                            .clicked()
+                            if proj.is_game
+                                && icons::tool_button(
+                                    ui,
+                                    &self.icon_set,
+                                    icons::Tool::NewScene,
+                                    tr(lang, K::SceneEditor),
+                                )
+                                .clicked()
                             {
-                                action = Some(Action::AddGenerator(Generator::Scene));
+                                action = Some(Action::OpenScene);
                             }
                             if icons::tool_button(
                                 ui,
@@ -2812,6 +2905,8 @@ impl eframe::App for IcApp {
                                 &self.icon_set,
                                 &mut self.dragging_file,
                                 &mut self.root_collapsed,
+                                &mut self.inline_new,
+                                self.file_clipboard.is_some(),
                                 &mut action,
                             );
                             if ui.input(|i| i.pointer.any_released()) {
@@ -2855,23 +2950,25 @@ impl eframe::App for IcApp {
                         {
                             action = Some(Action::CloseScene);
                         }
-                        if ui_color::sel_label(ui, self.scene_editor.open, tr(lang, K::SceneEditor))
+                        if proj.is_game
+                            && ui_color::sel_label(
+                                ui,
+                                self.scene_editor.open,
+                                tr(lang, K::SceneEditor),
+                            )
                             .clicked()
                         {
                             action = Some(Action::OpenScene);
                         }
                     });
                     if self.scene_editor.open {
-                        let (save, generator, run) =
+                        let (save, run) =
                             scene_ui::scene_toolbar_ui(ui, &mut self.scene_editor, lang);
                         if save {
                             action = Some(Action::SaveScene);
                         }
                         if run {
                             action = Some(Action::Run);
-                        }
-                        if let Some(g) = generator {
-                            action = Some(Action::AddGenerator(g));
                         }
                         scene_ui::scene_canvas_ui(ui, &mut self.scene_editor, lang, dark, p.editor);
                         return;
@@ -3173,6 +3270,20 @@ impl eframe::App for IcApp {
                                     egui::TextEdit::singleline(&mut draft.s.title)
                                         .desired_width(f32::INFINITY),
                                 );
+                                ui.add_space(8.0);
+                                ui.label(t2(lang, "Тип проекта", "Project type"));
+                                ui.horizontal(|ui| {
+                                    for (id, ru, en) in [
+                                        ("game", "Игра", "Game"),
+                                        ("app", "Программа", "Program"),
+                                    ] {
+                                        if ui_color::sel_label(ui, draft.s.kind == id, t2(lang, ru, en))
+                                            .clicked()
+                                        {
+                                            draft.s.kind = id.to_string();
+                                        }
+                                    }
+                                });
                                 ui.add_space(8.0);
                                 ui.label(t2(lang, "Значок игры (PNG)", "Game icon (PNG)"));
                                 egui::ComboBox::from_id_source("project_icon")
@@ -3496,16 +3607,6 @@ impl eframe::App for IcApp {
                                 ui.text_edit_singleline(&mut dlg.label);
                             });
                         }
-                        ui.add_space(8.0);
-                        ui.label(RichText::new(tr(lang, K::AddNow)).strong());
-                        ui.horizontal_wrapped(|ui| {
-                            // FPS, физика и камера — в редакторе сцен
-                            for (i, g) in Generator::ALL.iter().enumerate() {
-                                if *g == Generator::Scene {
-                                    ui.checkbox(&mut dlg.gens[i], generator_label(lang, *g));
-                                }
-                            }
-                        });
                     }
 
                     ui.add_space(8.0);
@@ -3637,28 +3738,6 @@ impl eframe::App for IcApp {
         } else {
             dragfx::end(ctx, "node");
         }
-        if let Some(g) = self.scene_editor.module_drag {
-            dragfx::ghost(
-                ctx,
-                "module",
-                &generator_label(lang, g),
-                None,
-                p.panel,
-                p.accent,
-            );
-            if ctx.input(|i| i.pointer.any_released()) {
-                let over = ctx
-                    .input(|i| i.pointer.latest_pos())
-                    .zip(self.scene_editor.canvas_rect)
-                    .is_some_and(|(pos, rect)| rect.contains(pos));
-                self.scene_editor.module_drag = None;
-                if over {
-                    action = Some(Action::AddGenerator(g));
-                }
-            }
-        } else {
-            dragfx::end(ctx, "module");
-        }
         if self.settings_open && self.app_settings_window(ctx) {
             setup_style(ctx, self.settings.dark);
             self.settings.save();
@@ -3720,7 +3799,7 @@ pub fn run() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([980.0, 560.0])
-            .with_title("IC")
+            .with_title("Intelligent Compiler")
             .with_icon(egui::IconData {
                 rgba: ICON_RGBA.to_vec(),
                 width: 256,

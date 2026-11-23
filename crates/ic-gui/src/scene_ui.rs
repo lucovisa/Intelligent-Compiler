@@ -60,6 +60,7 @@ pub const NODE_GROUPS: &[(&str, [u8; 3], &[&str])] = &[
         [92, 164, 116],
         &["Timer", "Path2D", "NavigationRegion2D", "AnimationPlayer"],
     ),
+    ("Game", [224, 164, 64], &["FPS", "Body", "Solid"]),
 ];
 
 // Размер и цвет нового узла
@@ -76,6 +77,9 @@ pub fn node_defaults(kind: &str) -> (f32, f32, [u8; 3]) {
         "Camera2D" => (72.0, 52.0),
         "Sprite2D" | "AnimatedSprite2D" => (88.0, 88.0),
         "CollisionShape2D" | "RayCast2D" => (76.0, 76.0),
+        "FPS" => (110.0, 30.0),
+        "Body" => (40.0, 40.0),
+        "Solid" => (240.0, 24.0),
         _ => (112.0, 72.0),
     };
     (w, h, color)
@@ -89,12 +93,12 @@ pub fn node_color(kind: &str) -> [u8; 3] {
         .unwrap_or([128, 134, 144])
 }
 
-fn add_node_menu(ui: &mut egui::Ui, scene: &mut SceneEditor) {
+fn add_node_menu(ui: &mut egui::Ui, scene: &mut SceneEditor, parent: Option<usize>) {
     for (group, _, kinds) in NODE_GROUPS {
         ui.menu_button(*group, |ui| {
             for kind in *kinds {
                 if ui.button(*kind).clicked() {
-                    scene.add_node_kind(kind);
+                    scene.add_node_under(kind, parent);
                     ui.close_menu();
                 }
             }
@@ -167,7 +171,7 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr(lang, K::Hierarchy)).small().strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.menu_button("+", |ui| add_node_menu(ui, scene))
+            ui.menu_button("+", |ui| add_node_menu(ui, scene, None))
                 .response
                 .on_hover_text(tr(lang, K::AddSceneNode));
         });
@@ -179,11 +183,12 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            for index in 0..scene.nodes.len() {
+            for (index, depth) in scene.tree_order() {
                 let kind = scene.nodes[index].kind.clone();
                 let name = scene.nodes[index].name.clone();
                 let color = kind_rgb(&kind);
                 let row = ui.horizontal(|ui| {
+                    ui.add_space(depth as f32 * 14.0);
                     let mut visible = scene.nodes[index].visible;
                     if eye_toggle(ui, visible)
                         .on_hover_text(t2(lang, "Показать / скрыть", "Show / hide"))
@@ -247,6 +252,25 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
                             if !scene.is_selected(index) {
                                 scene.set_selection(&[index]);
                             }
+                            ui.menu_button(
+                                t2(lang, "Добавить дочерний", "Add child"),
+                                |ui| {
+                                    add_node_menu(ui, scene, Some(index));
+                                },
+                            );
+                            if scene.nodes[index].parent.is_empty() {
+                                ui.add_enabled(
+                                    false,
+                                    egui::Button::new(t2(lang, "Сделать корневым", "Make root")),
+                                );
+                            } else if ui
+                                .button(t2(lang, "Сделать корневым", "Make root"))
+                                .clicked()
+                            {
+                                action = Some((index, 5));
+                                ui.close_menu();
+                            }
+                            ui.separator();
                             for (label, code) in [
                                 (t2(lang, "Переименовать (F2)", "Rename (F2)"), 0),
                                 (t2(lang, "Дублировать (Ctrl+D)", "Duplicate (Ctrl+D)"), 1),
@@ -268,28 +292,48 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
                 ui.label(RichText::new(tr(lang, K::SceneEmpty)).small());
             }
         });
-    // Перетаскивание строк меняет порядок слоёв
+    // Перетаскивание строки: на середину — стать дочерним, к краю — встать рядом
     if let Some(from) = scene.tree_drag {
         let pointer = ui.input(|i| i.pointer.hover_pos());
-        let target = pointer.and_then(|p| {
+        let hit = pointer.and_then(|p| {
             rows.iter()
                 .find(|(_, r)| r.y_range().contains(p.y))
-                .map(|(i, _)| *i)
+                .map(|(i, r)| (*i, *r, p))
         });
-        if let (Some(t), Some((_, r))) = (
-            target,
-            target.and_then(|t| rows.iter().find(|(i, _)| *i == t)),
-        ) {
-            let y = if t > from { r.bottom() } else { r.top() };
-            ui.painter().line_segment(
-                [egui::pos2(r.left(), y), egui::pos2(r.right(), y)],
-                Stroke::new(2.0_f32, Color32::from_rgb(0x4F, 0x9D, 0xE8)),
-            );
+        let drop = hit.map(|(t, r, p)| {
+            let f = (p.y - r.top()) / r.height().max(1.0);
+            (
+                t,
+                r,
+                if f < 0.25 {
+                    0u8
+                } else if f > 0.75 {
+                    2
+                } else {
+                    1
+                },
+            )
+        });
+        if let Some((_, r, zone)) = drop {
+            let color = Color32::from_rgb(0x4F, 0x9D, 0xE8);
+            match zone {
+                1 => {
+                    ui.painter()
+                        .rect_stroke(r, Rounding::same(3.0), Stroke::new(2.0_f32, color));
+                }
+                z => {
+                    let y = if z == 0 { r.top() } else { r.bottom() };
+                    ui.painter().line_segment(
+                        [egui::pos2(r.left(), y), egui::pos2(r.right(), y)],
+                        Stroke::new(2.0_f32, color),
+                    );
+                }
+            }
         }
         if ui.input(|i| i.pointer.any_released()) {
             scene.tree_drag = None;
-            if let Some(t) = target {
-                scene.move_node(from, t);
+            if let Some((t, _, zone)) = drop {
+                scene.drop_on(from, t, zone);
             }
         }
     }
@@ -304,19 +348,17 @@ pub fn scene_tree_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) {
             1 => scene.duplicate_selected(),
             2 => scene.move_layer(-1),
             3 => scene.move_layer(1),
+            5 => {
+                scene.set_parent(index, None);
+            }
             _ => scene.delete_selected(),
         }
     }
 }
 
 // Панель сцены: сохранить, отмена, масштаб, сетка, модули
-pub fn scene_toolbar_ui(
-    ui: &mut egui::Ui,
-    scene: &mut SceneEditor,
-    lang: Lang,
-) -> (bool, Option<Generator>, bool) {
+pub fn scene_toolbar_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang) -> (bool, bool) {
     let mut save = false;
-    let mut generator = None;
     let mut run = false;
     ui.horizontal_wrapped(|ui| {
         if button(ui, tr(lang, K::Save))
@@ -331,24 +373,12 @@ pub fn scene_toolbar_ui(
         {
             run = true;
         }
-        // Модули: клик добавляет, перетаскивание на холст — тоже
-        ui.label(t2(lang, "Модули:", "Modules:"));
-        for g in [Generator::Fps, Generator::Physics] {
-            let resp = ui
-                .add(
-                    egui::Button::new(generator_label(lang, g))
-                        .sense(egui::Sense::click_and_drag()),
-                )
-                .on_hover_text(t2(
-                    lang,
-                    "Клик или перетащи на сцену",
-                    "Click or drag onto the scene",
-                ));
-            if resp.drag_started() {
-                scene.module_drag = Some(g);
-            }
-            if resp.clicked() {
-                generator = Some(g);
+        for kind in ["FPS", "Body", "Solid"] {
+            if button(ui, kind)
+                .on_hover_text(t2(lang, "Добавить узел", "Add node"))
+                .clicked()
+            {
+                scene.add_node_kind(kind);
             }
         }
         if ui
@@ -391,7 +421,7 @@ pub fn scene_toolbar_ui(
         }
     });
     ui.add_space(4.0);
-    (save, generator, run)
+    (save, run)
 }
 
 // Свойства выбранного узла (правая колонка)
@@ -413,6 +443,10 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
         );
     }
     let mut rename_to: Option<String> = None;
+    let mut new_parent: Option<Option<usize>> = None;
+    let names: Vec<String> = scene.nodes.iter().map(|n| n.name.clone()).collect();
+    let mut blocked = scene.descendants(index);
+    blocked.push(index);
     let mut layer = 0isize;
     let mut delete = false;
     {
@@ -449,6 +483,28 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
             })
             .small(),
         );
+        ui.add_space(6.0);
+        ui.label(t2(lang, "Родитель", "Parent"));
+        egui::ComboBox::from_id_source("scene_node_parent")
+            .selected_text(if node.parent.is_empty() {
+                "—"
+            } else {
+                node.parent.as_str()
+            })
+            .width(170.0)
+            .show_ui(ui, |ui| {
+                if ui_color::sel_label(ui, node.parent.is_empty(), "—").clicked() {
+                    new_parent = Some(None);
+                }
+                for (i, other) in names.iter().enumerate() {
+                    if i != index && !blocked.contains(&i) {
+                        if ui_color::sel_label(ui, node.parent == *other, other.as_str()).clicked()
+                        {
+                            new_parent = Some(Some(i));
+                        }
+                    }
+                }
+            });
         ui.add_space(6.0);
         ui.label(tr(lang, K::NodeName));
         let mut name = node.name.clone();
@@ -514,6 +570,29 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
                     .range(4.0..=400.0),
             );
         });
+        if node.kind == "Body" {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(t2(lang, "Гравитация", "Gravity"));
+                ui.add(egui::DragValue::new(&mut node.gravity).speed(5.0));
+            });
+            ui.horizontal(|ui| {
+                ui.label(t2(lang, "Упругость", "Bounce"));
+                ui.add(
+                    egui::DragValue::new(&mut node.bounce)
+                        .speed(0.01)
+                        .range(0.0..=1.0),
+                );
+            });
+            ui.label(
+                RichText::new(t2(
+                    lang,
+                    "Тело падает и отскакивает от узлов «Solid». Ставь тело и твёрдое в корень сцены.",
+                    "The body falls and bounces off Solid nodes. Keep bodies and solids at the scene root.",
+                ))
+                .small(),
+            );
+        }
         ui.add_space(6.0);
         ui.label(tr(lang, K::Color));
         ui.color_edit_button_srgb(&mut node.color);
@@ -549,6 +628,9 @@ pub fn scene_inspector_ui(ui: &mut egui::Ui, scene: &mut SceneEditor, lang: Lang
     }
     if let Some(name) = rename_to {
         scene.rename(index, &name);
+    }
+    if let Some(parent) = new_parent {
+        scene.set_parent(index, parent);
     }
     if layer != 0 {
         scene.move_layer(layer);
@@ -659,6 +741,73 @@ pub fn scene_canvas_ui(
             }
         }
     }
+    // Правая кнопка без перетаскивания: меню (с перетаскиванием она двигает холст)
+    if resp.secondary_clicked() {
+        if let Some(p) = resp.interact_pointer_pos() {
+            let (wx, wy) = s2w(center, scene.pan, scene.zoom, p);
+            match node_at(scene, wx, wy) {
+                Some(i) if !scene.is_selected(i) => scene.set_selection(&[i]),
+                Some(_) => {}
+                None => scene.clear_selection(),
+            }
+        }
+    }
+    resp.context_menu(|ui| {
+        let sel = scene.selected;
+        ui.menu_button(t2(lang, "Добавить узел", "Add node"), |ui| {
+            add_node_menu(ui, scene, None);
+        });
+        if sel.is_some() {
+            ui.menu_button(
+                t2(lang, "Добавить дочерний", "Add child"),
+                |ui| {
+                    add_node_menu(ui, scene, sel);
+                },
+            );
+        }
+        ui.separator();
+        let mut done = true;
+        if ui
+            .add_enabled(
+                sel.is_some(),
+                egui::Button::new(t2(lang, "Копировать", "Copy")),
+            )
+            .clicked()
+        {
+            scene.copy_selected();
+        } else if ui
+            .add_enabled(
+                !scene.clipboard.is_empty(),
+                egui::Button::new(t2(lang, "Вставить", "Paste")),
+            )
+            .clicked()
+        {
+            scene.paste();
+        } else if ui
+            .add_enabled(
+                sel.is_some(),
+                egui::Button::new(t2(lang, "Дублировать", "Duplicate")),
+            )
+            .clicked()
+        {
+            scene.duplicate_selected();
+        } else if ui
+            .add_enabled(
+                sel.is_some(),
+                egui::Button::new(tr(lang, K::DeleteSceneNode)),
+            )
+            .clicked()
+        {
+            scene.delete_selected();
+        } else if ui.button(t2(lang, "Выделить всё", "Select all")).clicked() {
+            scene.select_all();
+        } else {
+            done = false;
+        }
+        if done {
+            ui.close_menu();
+        }
+    });
     let (pan, zoom) = (scene.pan, scene.zoom);
 
     // Сетка
@@ -757,7 +906,7 @@ pub fn scene_canvas_ui(
         let texture = scene.textures.get(&n.texture).and_then(|t| t.as_ref());
         let fill = if !visual {
             base.gamma_multiply(0.15)
-        } else if texture.is_some() || n.kind == "Label" {
+        } else if texture.is_some() || n.kind == "Label" || n.kind == "FPS" {
             Color32::TRANSPARENT
         } else {
             Color32::from_rgba_unmultiplied(n.color[0], n.color[1], n.color[2], n.alpha)
@@ -787,8 +936,20 @@ pub fn scene_canvas_ui(
             mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
             painter.add(egui::Shape::mesh(mesh));
         }
-        let label = if n.text.is_empty() { &n.name } else { &n.text };
-        let (label_size, label_color) = if n.text.is_empty() {
+        let fps_text = "FPS: 60".to_string();
+        let label = if n.kind == "FPS" {
+            &fps_text
+        } else if n.text.is_empty() {
+            &n.name
+        } else {
+            &n.text
+        };
+        let (label_size, label_color) = if n.kind == "FPS" {
+            (
+                (n.font_size * zoom).clamp(6.0, 400.0),
+                Color32::from_rgb(n.color[0], n.color[1], n.color[2]),
+            )
+        } else if n.text.is_empty() {
             (
                 13.0,
                 if n.locked {
@@ -1261,6 +1422,9 @@ mod tests {
             texture: String::new(),
             text: String::new(),
             font_size: 24.0,
+            parent: String::new(),
+            gravity: 900.0,
+            bounce: 0.0,
         };
         let (hx, hy) = handle_pos(&n, 3);
         assert!(

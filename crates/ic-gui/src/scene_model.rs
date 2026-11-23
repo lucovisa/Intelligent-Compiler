@@ -1,6 +1,7 @@
 use super::*;
 
-pub const SCENE_FILE: &str = "main.ic-scene";
+pub const MAIN_SCENE: &str = "main.ic";
+const LEGACY_SCENE: &str = "scenes/main.ic-scene";
 const MAX_UNDO: usize = 200;
 // Кадр камеры по умолчанию: 1280×720 с началом координат в центре, ось Y вверх
 pub const FRAME_W: f32 = 1280.0;
@@ -23,6 +24,10 @@ pub struct SceneNode {
     pub texture: String,
     pub text: String,
     pub font_size: f32,
+    // Родитель по имени (пусто — корень), гравитация и упругость для физики
+    pub parent: String,
+    pub gravity: f32,
+    pub bounce: f32,
 }
 
 // Рисуются ли узлы этого вида в игре (движок умеет только цветные прямоугольники)
@@ -75,7 +80,6 @@ pub struct SceneEditor {
     pub clipboard: Vec<SceneNode>,
     pub focus_request: bool,
     pub tree_drag: Option<usize>,
-    pub module_drag: Option<Generator>,
     pub canvas_rect: Option<egui::Rect>,
     pub project_dir: Option<PathBuf>,
     pub pngs: Vec<String>,
@@ -107,7 +111,6 @@ impl Default for SceneEditor {
             clipboard: Vec::new(),
             focus_request: false,
             tree_drag: None,
-            module_drag: None,
             canvas_rect: None,
             project_dir: None,
             pngs: Vec::new(),
@@ -140,16 +143,6 @@ fn fmt(v: f32) -> String {
     }
 }
 
-// Движок рисует цвета как линейные, редактор показывает sRGB
-fn srgb_to_linear(v: u8) -> f32 {
-    let c = v as f32 / 255.0;
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
 fn escape(s: &str) -> String {
     s.replace('%', "%25")
         .replace('|', "%7C")
@@ -160,20 +153,6 @@ fn unescape(s: &str) -> String {
     s.replace("%0A", "\n")
         .replace("%7C", "|")
         .replace("%25", "%")
-}
-
-fn lua_string(s: &str) -> String {
-    let mut out = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            c if c.is_control() => out.push(' '),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 // Файл сцены → узлы; старый формат (угол холста, Y вниз) переводится в мировые координаты
@@ -189,7 +168,7 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
         if parts.first() != Some(&"node") {
             continue;
         }
-        if v2 && (parts.len() == 12 || parts.len() == 14 || parts.len() == 17) {
+        if v2 && matches!(parts.len(), 12 | 14 | 17 | 20) {
             let f = |i: usize| parts[i].parse::<f32>().ok();
             let u = |i: usize| parts[i].parse::<u8>().ok();
             if let (
@@ -219,6 +198,9 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
                     texture: parts.get(14).map(|v| unescape(v)).unwrap_or_default(),
                     text: parts.get(15).map(|v| unescape(v)).unwrap_or_default(),
                     font_size: parts.get(16).and_then(|v| v.parse().ok()).unwrap_or(24.0),
+                    parent: parts.get(17).map(|v| unescape(v)).unwrap_or_default(),
+                    gravity: parts.get(18).and_then(|v| v.parse().ok()).unwrap_or(900.0),
+                    bounce: parts.get(19).and_then(|v| v.parse().ok()).unwrap_or(0.0),
                 });
             }
         } else if !v2 && (parts.len() == 9 || parts.len() == 10) {
@@ -248,22 +230,66 @@ pub fn parse_scene(text: &str) -> Vec<SceneNode> {
                     texture: String::new(),
                     text: String::new(),
                     font_size: 24.0,
+                    parent: String::new(),
+                    gravity: 900.0,
+                    bounce: 0.0,
                 });
             }
         }
     }
+    to_world(&mut nodes);
     nodes
 }
 
+// Позиция узла в мире по цепочке родителей (в файле позиции дочерних — относительные)
+fn parent_of(nodes: &[SceneNode], i: usize) -> Option<usize> {
+    let name = nodes[i].parent.as_str();
+    if name.is_empty() {
+        return None;
+    }
+    nodes
+        .iter()
+        .position(|n| n.name == name)
+        .filter(|p| *p != i)
+}
+
+fn chain_offset(nodes: &[SceneNode], i: usize, local: &[(f32, f32)]) -> (f32, f32) {
+    let (mut x, mut y) = (0.0, 0.0);
+    let mut cur = parent_of(nodes, i);
+    let mut guard = 0;
+    while let Some(p) = cur {
+        x += local[p].0;
+        y += local[p].1;
+        guard += 1;
+        if guard > nodes.len() {
+            break;
+        }
+        cur = parent_of(nodes, p);
+    }
+    (x, y)
+}
+
+// Файл хранит относительные позиции, редактор работает с мировыми
+fn to_world(nodes: &mut [SceneNode]) {
+    let local: Vec<(f32, f32)> = nodes.iter().map(|n| (n.x, n.y)).collect();
+    for i in 0..nodes.len() {
+        let (ox, oy) = chain_offset(nodes, i, &local);
+        nodes[i].x = local[i].0 + ox;
+        nodes[i].y = local[i].1 + oy;
+    }
+}
+
 pub fn scene_text(nodes: &[SceneNode]) -> String {
-    let mut out = String::from("ic-scene|4\n");
-    for n in nodes {
+    let world: Vec<(f32, f32)> = nodes.iter().map(|n| (n.x, n.y)).collect();
+    let mut out = String::from("ic-scene|5\n");
+    for (i, n) in nodes.iter().enumerate() {
+        let (ox, oy) = parent_of(nodes, i).map_or((0.0, 0.0), |p| world[p]);
         out.push_str(&format!(
-            "node|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}\n",
+            "node|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}\n",
             n.kind,
             n.name.replace('|', "%7C").replace('\n', " "),
-            fmt(n.x),
-            fmt(n.y),
+            fmt(n.x - ox),
+            fmt(n.y - oy),
             fmt(n.width),
             fmt(n.height),
             n.color[0],
@@ -275,40 +301,14 @@ pub fn scene_text(nodes: &[SceneNode]) -> String {
             u8::from(n.locked),
             escape(&n.texture),
             escape(&n.text),
-            fmt(n.font_size)
+            fmt(n.font_size),
+            escape(&n.parent),
+            fmt(n.gravity),
+            fmt(n.bounce)
         ));
     }
     out
 }
-
-// Lua-модуль со сценой: его читает scene.load в игре
-pub fn scene_lua(nodes: &[SceneNode]) -> String {
-    let mut out = String::from("return {\n");
-    for n in nodes {
-        out.push_str(&format!(
-            "    {{ kind = {}, name = {}, x = {}, y = {}, w = {}, h = {}, rot = {}, r = {}, g = {}, b = {}, a = {}, visual = {}, tex = {}, text = {}, size = {} }},\n",
-            lua_string(&n.kind),
-            lua_string(&n.name),
-            fmt(n.x),
-            fmt(n.y),
-            fmt(n.width),
-            fmt(n.height),
-            fmt(n.rotation.to_radians()),
-            fmt(srgb_to_linear(n.color[0])),
-            fmt(srgb_to_linear(n.color[1])),
-            fmt(srgb_to_linear(n.color[2])),
-            fmt(n.alpha as f32 / 255.0),
-            is_visual(&n.kind) && n.visible,
-            lua_string(&n.texture),
-            lua_string(&n.text),
-            fmt(n.font_size)
-        ));
-    }
-    out.push_str("}\n");
-    out
-}
-
-const LOADER: &str = include_str!("../../ic-build/templates/scene.lua");
 
 // Все PNG проекта (до глубины 4), пути с «/»
 pub fn list_pngs(root: &Path) -> Vec<String> {
@@ -336,56 +336,29 @@ pub fn list_pngs(root: &Path) -> Vec<String> {
     out
 }
 
-// Загрузчик первой версии (без картинок и текста): его заменяем на новый целиком
-const OLD_LOADER: &str = include_str!("old_scene_loader.lua");
-
-// В scene.lua должен быть scene.load; у старых проектов дописываем или обновляем
-fn ensure_loader(project: &Path) -> Result<(), String> {
-    let path = project.join("scene.lua");
-    if !project_path_is_safe(project, &path) && path.exists() {
-        return Err("scene.lua вне проекта".into());
-    }
-    let start = LOADER
-        .find("function scene.load")
-        .ok_or("шаблон scene.lua повреждён")?;
-    let end = LOADER
-        .rfind("return scene")
-        .ok_or("шаблон scene.lua повреждён")?;
-    let snippet = &LOADER[start..end];
-    match fs::read_to_string(&path) {
-        Ok(text) if text.contains("function level.clicked") => Ok(()),
-        Ok(text) if text.contains(OLD_LOADER.trim_end()) => fs::write(
-            &path,
-            text.replace(OLD_LOADER.trim_end(), snippet.trim_end()),
-        )
-        .map_err(|e| e.to_string()),
-        Ok(text) if text.contains("function scene.load") => {
-            Err("scene.lua: свой scene.load не обновлён — удали его и сохрани сцену ещё раз".into())
-        }
-        Ok(text) => {
-            let patched = match text.rfind("return scene") {
-                Some(i) => format!("{}{}{}", &text[..i], snippet, &text[i..]),
-                None => format!("{text}\n{snippet}"),
-            };
-            fs::write(&path, patched).map_err(|e| e.to_string())
-        }
-        Err(_) => fs::write(&path, ic_build::scaffold::SCENE).map_err(|e| e.to_string()),
-    }
-}
-
 impl SceneEditor {
     pub fn open_project(&mut self, project_dir: &Path) {
-        let dir = project_dir.join("scenes");
-        if dir.exists() && (!dir.is_dir() || !project_path_is_safe(project_dir, &dir)) {
+        self.open_scene(project_dir, &project_dir.join(MAIN_SCENE));
+    }
+
+    // Открывает .ic из проекта; старый scenes/main.ic-scene читается как main.ic
+    pub fn open_scene(&mut self, project_dir: &Path, path: &Path) {
+        if !project_path_is_safe(project_dir, path) {
             self.open = false;
             self.path = None;
-            self.status = Some("Scene folder is outside the project".into());
+            self.status = Some("Scene file is outside the project".into());
             return;
         }
-        let path = dir.join(SCENE_FILE);
-        self.nodes = fs::read_to_string(&path)
-            .map(|t| parse_scene(&t))
-            .unwrap_or_default();
+        let is_main = path == project_dir.join(MAIN_SCENE);
+        let text = fs::read_to_string(path).ok().or_else(|| {
+            let legacy = project_dir.join(LEGACY_SCENE);
+            if is_main && project_path_is_safe(project_dir, &legacy) {
+                fs::read_to_string(legacy).ok()
+            } else {
+                None
+            }
+        });
+        self.nodes = text.map(|t| parse_scene(&t)).unwrap_or_default();
         self.clear_selection();
         self.clipboard.clear();
         self.dirty = false;
@@ -396,7 +369,7 @@ impl SceneEditor {
         self.redo.clear();
         self.gesture_base = None;
         self.fitted = false;
-        self.path = Some(path);
+        self.path = Some(path.to_path_buf());
         self.project_dir = Some(project_dir.to_path_buf());
         self.refresh_pngs();
     }
@@ -426,23 +399,12 @@ impl SceneEditor {
         let Some(path) = self.path.clone() else {
             return Err("Scene path is not set".into());
         };
-        let project = path.parent().and_then(Path::parent).map(Path::to_path_buf);
-        // Сначала папка сцен, потом сам файл: путь должен оставаться внутри проекта
-        if let (Some(project), Some(parent)) = (&project, path.parent()) {
-            if !project_path_is_safe(project, parent) {
-                return Err("Scene path is outside the project".into());
-            }
-            fs::create_dir_all(parent).map_err(|e| format!("scene save error: {e}"))?;
+        if let Some(project) = &self.project_dir {
             if !project_path_is_safe(project, &path) {
                 return Err("Scene path is outside the project".into());
             }
         }
         fs::write(&path, scene_text(&self.nodes)).map_err(|e| format!("scene save error: {e}"))?;
-        let lua = path.with_extension("lua");
-        fs::write(&lua, scene_lua(&self.nodes)).map_err(|e| format!("scene save error: {e}"))?;
-        if let Some(project) = &project {
-            ensure_loader(project)?;
-        }
         self.dirty = false;
         Ok(())
     }
@@ -464,15 +426,28 @@ impl SceneEditor {
     }
 
     pub fn add_node_kind(&mut self, kind: &str) {
+        self.add_node_under(kind, None);
+    }
+
+    // Новый узел; с родителем он появляется рядом с ним и становится дочерним
+    pub fn add_node_under(&mut self, kind: &str, parent: Option<usize>) {
         self.checkpoint();
         let (width, height, color) = scene_ui::node_defaults(kind);
         let n = self.nodes.len() as f32;
         let name = self.unique_name(kind, None);
+        let (x, y, parent_name) = match parent.and_then(|p| self.nodes.get(p)) {
+            Some(p) => (p.x + 24.0, p.y - 24.0, p.name.clone()),
+            None => (
+                (n * 112.0).rem_euclid(560.0) - 280.0,
+                120.0 - (n * 80.0).rem_euclid(240.0),
+                String::new(),
+            ),
+        };
         self.nodes.push(SceneNode {
             kind: kind.to_string(),
             name,
-            x: (n * 112.0).rem_euclid(560.0) - 280.0,
-            y: 120.0 - (n * 80.0).rem_euclid(240.0),
+            x,
+            y,
             width,
             height,
             rotation: 0.0,
@@ -487,6 +462,9 @@ impl SceneEditor {
                 _ => String::new(),
             },
             font_size: 24.0,
+            parent: parent_name,
+            gravity: 900.0,
+            bounce: 0.0,
         });
         self.set_selection(&[self.nodes.len() - 1]);
         self.finish_change();
@@ -503,7 +481,12 @@ impl SceneEditor {
         }
         self.checkpoint();
         let name = self.unique_name(clean, Some(index));
-        self.nodes[index].name = name;
+        let old_name = std::mem::replace(&mut self.nodes[index].name, name.clone());
+        for n in &mut self.nodes {
+            if n.parent == old_name {
+                n.parent = name.clone();
+            }
+        }
         self.finish_change();
     }
 
@@ -575,10 +558,16 @@ impl SceneEditor {
         }
         self.checkpoint();
         let mut added = Vec::new();
+        let mut renamed: HashMap<String, String> = HashMap::new();
         for mut node in self.clipboard.clone() {
+            let old_name = node.name.clone();
             node.name = self.unique_name(&node.name, None);
+            renamed.insert(old_name, node.name.clone());
             node.x += 16.0;
             node.y -= 16.0;
+            if let Some(new_parent) = renamed.get(&node.parent) {
+                node.parent = new_parent.clone();
+            }
             self.nodes.push(node);
             added.push(self.nodes.len() - 1);
         }
@@ -594,11 +583,17 @@ impl SceneEditor {
         }
         self.checkpoint();
         let mut added = Vec::new();
+        let mut renamed: HashMap<String, String> = HashMap::new();
         for i in all {
             let mut copy = self.nodes[i].clone();
+            let old_name = copy.name.clone();
             copy.name = self.unique_name(&copy.name, None);
+            renamed.insert(old_name, copy.name.clone());
             copy.x += 16.0;
             copy.y -= 16.0;
+            if let Some(new_parent) = renamed.get(&copy.parent) {
+                copy.parent = new_parent.clone();
+            }
             self.nodes.push(copy);
             added.push(self.nodes.len() - 1);
         }
@@ -612,7 +607,13 @@ impl SceneEditor {
             return;
         }
         self.checkpoint();
-        for i in all.into_iter().rev() {
+        let mut doomed: Vec<usize> = all.clone();
+        for i in all {
+            doomed.extend(self.descendants(i));
+        }
+        doomed.sort_unstable();
+        doomed.dedup();
+        for i in doomed.into_iter().rev() {
             self.nodes.remove(i);
         }
         self.clear_selection();
@@ -663,6 +664,156 @@ impl SceneEditor {
         self.finish_change();
     }
 
+    // Индекс родителя узла
+    pub fn parent_index(&self, i: usize) -> Option<usize> {
+        if i >= self.nodes.len() {
+            return None;
+        }
+        parent_of(&self.nodes, i)
+    }
+
+    // Прямые дочерние узлы
+    pub fn children_of(&self, i: usize) -> Vec<usize> {
+        (0..self.nodes.len())
+            .filter(|c| self.parent_index(*c) == Some(i))
+            .collect()
+    }
+
+    // Все потомки узла любой глубины
+    pub fn descendants(&self, i: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut stack = self.children_of(i);
+        while let Some(c) = stack.pop() {
+            if c != i && !out.contains(&c) {
+                out.push(c);
+                stack.extend(self.children_of(c));
+            }
+        }
+        out
+    }
+
+    // Глубина узла в дереве (корень — 0)
+    pub fn depth(&self, i: usize) -> usize {
+        let mut d = 0;
+        let mut cur = self.parent_index(i);
+        while let Some(p) = cur {
+            d += 1;
+            if d > self.nodes.len() {
+                break;
+            }
+            cur = self.parent_index(p);
+        }
+        d
+    }
+
+    // Порядок строк дерева: родитель, затем его дети (индекс, глубина)
+    pub fn tree_order(&self) -> Vec<(usize, usize)> {
+        let mut out: Vec<(usize, usize)> = Vec::new();
+        let mut seen = vec![false; self.nodes.len()];
+        fn visit(
+            ed: &SceneEditor,
+            i: usize,
+            depth: usize,
+            seen: &mut [bool],
+            out: &mut Vec<(usize, usize)>,
+        ) {
+            if seen[i] {
+                return;
+            }
+            seen[i] = true;
+            out.push((i, depth));
+            for c in ed.children_of(i) {
+                visit(ed, c, depth + 1, seen, out);
+            }
+        }
+        for i in 0..self.nodes.len() {
+            if self.parent_index(i).is_none() {
+                visit(self, i, 0, &mut seen, &mut out);
+            }
+        }
+        for i in 0..self.nodes.len() {
+            visit(self, i, 0, &mut seen, &mut out);
+        }
+        out
+    }
+
+    // Новый родитель; позиция в мире не меняется. false — нельзя (цикл)
+    pub fn set_parent(&mut self, i: usize, parent: Option<usize>) -> bool {
+        if i >= self.nodes.len() {
+            return false;
+        }
+        let name = match parent {
+            Some(p) => {
+                if p >= self.nodes.len() || p == i || self.descendants(i).contains(&p) {
+                    return false;
+                }
+                self.nodes[p].name.clone()
+            }
+            None => String::new(),
+        };
+        if self.nodes[i].parent == name {
+            return true;
+        }
+        self.checkpoint();
+        self.nodes[i].parent = name;
+        self.finish_change();
+        true
+    }
+
+    // Перенос строки дерева: zone 0 — перед целью, 1 — внутрь (дочерним), 2 — после цели
+    pub fn drop_on(&mut self, from: usize, target: usize, zone: u8) {
+        if from >= self.nodes.len() || target >= self.nodes.len() || from == target {
+            return;
+        }
+        if self.descendants(from).contains(&target) {
+            return;
+        }
+        if zone == 1 {
+            self.set_parent(from, Some(target));
+            return;
+        }
+        self.checkpoint();
+        let parent = self.nodes[target].parent.clone();
+        let target_name = self.nodes[target].name.clone();
+        let mut node = self.nodes.remove(from);
+        node.parent = parent;
+        let at = self
+            .nodes
+            .iter()
+            .position(|n| n.name == target_name)
+            .unwrap_or(0);
+        let at = if zone == 0 { at } else { at + 1 };
+        self.nodes.insert(at, node);
+        self.set_selection(&[at]);
+        self.finish_change();
+    }
+
+    // Сдвиг узла за кадр переносит и его потомков, которые сами не двигались
+    fn carry_children(&mut self) {
+        if self.frame_start.len() != self.nodes.len() {
+            return;
+        }
+        let deltas: Vec<(f32, f32)> = self
+            .nodes
+            .iter()
+            .zip(&self.frame_start)
+            .map(|(a, b)| (a.x - b.x, a.y - b.y))
+            .collect();
+        // Сверху вниз: сам двигался — свой сдвиг, иначе сдвиг ближайшего родителя
+        let mut order: Vec<usize> = (0..self.nodes.len()).collect();
+        order.sort_by_key(|i| self.depth(*i));
+        let mut eff = vec![(0.0_f32, 0.0_f32); self.nodes.len()];
+        for i in order {
+            if deltas[i] != (0.0, 0.0) {
+                eff[i] = deltas[i];
+            } else if let Some(p) = self.parent_index(i) {
+                eff[i] = eff[p];
+                self.nodes[i].x += eff[i].0;
+                self.nodes[i].y += eff[i].1;
+            }
+        }
+    }
+
     // Явная команда (кнопка, меню): отдельный шаг отмены
     fn checkpoint(&mut self) {
         self.flush_gesture();
@@ -693,6 +844,7 @@ impl SceneEditor {
 
     // Конец кадра: жест (перетаскивание, набор текста) = один шаг отмены
     pub fn end_frame(&mut self, busy: bool) {
+        self.carry_children();
         if self.nodes != self.frame_start {
             if self.gesture_base.is_none() {
                 self.gesture_base = Some(self.frame_start.clone());
@@ -770,6 +922,9 @@ mod tests {
             texture: "assets/a|b.png".into(),
             text: "Привет|мир\nстрока".into(),
             font_size: 18.0,
+            parent: String::new(),
+            gravity: 900.0,
+            bounce: 0.0,
         }
     }
 
@@ -786,20 +941,6 @@ mod tests {
         assert_eq!(nodes[0].kind, "ColorRect");
         assert_eq!(nodes[0].x, 60.0 + 44.0 - 640.0);
         assert_eq!(nodes[0].y, 360.0 - 104.0);
-    }
-
-    #[test]
-    fn lua_module_has_world_data() {
-        let lua = scene_lua(&[node("Hero")]);
-        assert!(lua.starts_with("return {"));
-        assert!(lua.contains("name = \"Hero\""));
-        assert!(lua.contains("rot = 1.571"));
-        assert!(lua.contains("r = 1,"));
-        assert!(lua.contains("g = 0.216"));
-        assert!(lua.contains("visual = true"));
-        assert!(lua.contains("tex = \"assets/a|b.png\""));
-        assert!(lua.contains("size = 18"));
-        assert!(!lua.contains("--"));
     }
 
     #[test]
@@ -899,14 +1040,13 @@ mod tests {
     }
 
     #[test]
-    fn hidden_and_locked_survive_roundtrip_and_hide_in_game() {
+    fn hidden_and_locked_survive_roundtrip() {
         let mut hidden = node("H");
         hidden.visible = false;
         hidden.locked = true;
         let nodes = vec![hidden];
         let back = parse_scene(&scene_text(&nodes));
         assert_eq!(back, nodes);
-        assert!(scene_lua(&nodes).contains("visual = false"));
     }
 
     #[test]
@@ -923,22 +1063,135 @@ mod tests {
         assert!((y0 + 50.0).abs() < 0.01 && (y1 - 50.0).abs() < 0.01);
     }
 
-    #[test]
-    fn save_writes_scene_lua_module_and_loader() {
-        let dir = std::env::temp_dir().join(format!("ic_scene_{}", std::process::id()));
+    fn tmp_project(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ic_scene_{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("scene.lua"), "local scene = {}\nreturn scene\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn save_writes_only_main_ic() {
+        let dir = tmp_project("save");
         let mut s = SceneEditor::default();
         s.open_project(&dir);
         s.add_node_kind("ColorRect");
         s.save().unwrap();
-        assert!(dir.join("scenes/main.ic-scene").is_file());
-        assert!(fs::read_to_string(dir.join("scenes/main.lua"))
+        assert!(fs::read_to_string(dir.join("main.ic"))
             .unwrap()
             .contains("ColorRect"));
-        let loader = fs::read_to_string(dir.join("scene.lua")).unwrap();
-        assert!(loader.contains("function scene.load"));
-        assert!(loader.trim_end().ends_with("return scene"));
+        assert!(!dir.join("scenes").exists());
+        assert!(!dir.join("scene.lua").exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_scene_file_is_still_read() {
+        let dir = tmp_project("legacy");
+        fs::create_dir_all(dir.join("scenes")).unwrap();
+        fs::write(dir.join("scenes/main.ic-scene"), scene_text(&[node("Old")])).unwrap();
+        let mut s = SceneEditor::default();
+        s.open_project(&dir);
+        assert_eq!(s.nodes.len(), 1);
+        assert_eq!(s.path, Some(dir.join("main.ic")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn family() -> SceneEditor {
+        let mut s = SceneEditor::default();
+        let mut parent = node("Parent");
+        parent.x = 100.0;
+        parent.y = 50.0;
+        let mut kid = node("Kid");
+        kid.x = 110.0;
+        kid.y = 40.0;
+        kid.parent = "Parent".into();
+        let mut grand = node("Grand");
+        grand.x = 120.0;
+        grand.y = 30.0;
+        grand.parent = "Kid".into();
+        s.nodes = vec![parent, kid, grand, node("Other")];
+        s
+    }
+
+    #[test]
+    fn file_keeps_relative_positions_and_editor_world_ones() {
+        let s = family();
+        let text = scene_text(&s.nodes);
+        let kid_line = text
+            .lines()
+            .find(|l| l.starts_with("node|Sprite2D|Kid|"))
+            .unwrap();
+        assert!(kid_line.starts_with("node|Sprite2D|Kid|10|-10|"));
+        let back = parse_scene(&text);
+        assert_eq!(back, s.nodes);
+    }
+
+    #[test]
+    fn tree_order_and_depth_follow_parents() {
+        let s = family();
+        assert_eq!(s.tree_order(), vec![(0, 0), (1, 1), (2, 2), (3, 0)]);
+        assert_eq!(s.depth(2), 2);
+        assert_eq!(s.descendants(0).len(), 2);
+    }
+
+    #[test]
+    fn moving_a_parent_carries_children_once() {
+        let mut s = family();
+        s.begin_frame();
+        s.nodes[0].x += 30.0;
+        s.end_frame(false);
+        assert_eq!((s.nodes[1].x, s.nodes[2].x), (140.0, 150.0));
+        s.begin_frame();
+        s.nodes[0].x += 5.0;
+        s.nodes[1].x += 5.0;
+        s.end_frame(false);
+        assert_eq!((s.nodes[1].x, s.nodes[2].x), (145.0, 155.0));
+    }
+
+    #[test]
+    fn reparenting_rejects_cycles_and_keeps_world_position() {
+        let mut s = family();
+        assert!(!s.set_parent(0, Some(2)));
+        assert!(!s.set_parent(1, Some(1)));
+        let before = (s.nodes[3].x, s.nodes[3].y);
+        assert!(s.set_parent(3, Some(0)));
+        assert_eq!(s.nodes[3].parent, "Parent");
+        assert_eq!((s.nodes[3].x, s.nodes[3].y), before);
+        assert!(s.set_parent(3, None));
+        assert!(s.nodes[3].parent.is_empty());
+    }
+
+    #[test]
+    fn delete_removes_subtree_and_rename_updates_children() {
+        let mut s = family();
+        s.rename(0, "Boss");
+        assert_eq!(s.nodes[1].parent, "Boss");
+        s.set_selection(&[0]);
+        s.delete_selected();
+        assert_eq!(s.nodes.len(), 1);
+        assert_eq!(s.nodes[0].name, "Other");
+    }
+
+    #[test]
+    fn dropping_on_a_row_makes_child_or_sibling() {
+        let mut s = family();
+        s.drop_on(3, 1, 1);
+        assert_eq!(s.nodes[3].parent, "Kid");
+        s.drop_on(3, 0, 0);
+        assert!(
+            s.nodes[s.nodes.iter().position(|n| n.name == "Other").unwrap()]
+                .parent
+                .is_empty()
+        );
+        assert_eq!(s.nodes[0].name, "Other");
+    }
+
+    #[test]
+    fn duplicate_family_keeps_inner_links() {
+        let mut s = family();
+        s.set_selection(&[0, 1]);
+        s.duplicate_selected();
+        assert_eq!(s.nodes[5].parent, s.nodes[4].name);
     }
 }

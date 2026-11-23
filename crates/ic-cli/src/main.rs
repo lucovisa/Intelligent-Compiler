@@ -1,7 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod rust_mode;
 
-use ic_build::scaffold::{self, Dimension, Generator, Kind, NewProject};
+use ic_build::scaffold::{self, Dimension, Kind, NewProject};
 use ic_lua::LuaGame;
 use ic_render::run;
 use std::{
@@ -23,8 +23,6 @@ IC — игровой движок
         --app | --game       программа или игра (по умолчанию игра)
         --dim 2d|3d|custom   тип игры
         --label <текст>      название своего типа
-        --add scene,fps,physics,camera
-                             добавить заготовки
         --no-default-code    не вставлять демо-код
         --rust               проект на Rust (режим Б)
   ic check [папка]           проверить Lua-код без запуска
@@ -400,7 +398,7 @@ fn check_cmd(dir: &Path) {
 }
 
 fn new_args(rest: &[&str]) {
-    let usage = "ic new <имя> [--app|--game] [--dim 2d|3d|custom] [--label текст] [--add scene,fps,physics,camera] [--no-default-code] [--rust]";
+    let usage = "ic new <имя> [--app|--game] [--dim 2d|3d|custom] [--label текст] [--no-default-code] [--rust]";
     let mut name: Option<&str> = None;
     let mut rust = false;
     let mut opts = NewProject::default();
@@ -416,17 +414,6 @@ fn new_args(rest: &[&str]) {
                 None => die("--dim принимает 2d, 3d или custom"),
             },
             "--label" => opts.label = it.next().map(|s| s.to_string()).unwrap_or_default(),
-            "--add" => {
-                let list = it.next().copied().unwrap_or("");
-                for g in list.split(',').filter(|s| !s.is_empty()) {
-                    match Generator::parse(g) {
-                        Some(g) => opts.generators.push(g),
-                        None => die(&format!(
-                            "неизвестная заготовка «{g}» (scene, fps, physics, camera)"
-                        )),
-                    }
-                }
-            }
             other => name = Some(other),
         }
     }
@@ -514,7 +501,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use ic_build::scaffold::{Generator, DEMO};
+    use ic_build::scaffold::DEMO;
 
     fn check(name: &str, code: &str) {
         let d = ic_lua::check_sources(&[(format!("{name}.lua"), code.as_bytes().to_vec())]);
@@ -525,8 +512,5 @@ mod tests {
     #[test]
     fn templates_are_valid_lua() {
         check("demo", DEMO);
-        for g in Generator::ALL {
-            check(g.key(), g.code());
-        }
     }
 }

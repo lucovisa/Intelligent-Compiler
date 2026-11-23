@@ -52,12 +52,23 @@ fn mouse_button(v: &Value) -> usize {
     }
 }
 
+type Reader = Rc<dyn Fn(&str) -> Option<String>>;
+
+const SCENE_RUNTIME: &str = include_str!("scene_runtime.lua");
+
 fn register_api(
     lua: &Lua,
     shared: &Rc<RefCell<Shared>>,
     atlas: &Rc<AtlasData>,
+    reader: Reader,
 ) -> mlua::Result<()> {
     let ic = lua.create_table()?;
+
+    // Чтение файлов проекта для сцен
+    ic.set(
+        "_read",
+        lua.create_function(move |_, path: String| Ok(reader(&path)))?,
+    )?;
 
     let sh = shared.clone();
     ic.set(
@@ -277,7 +288,8 @@ fn register_api(
         })?,
     )?;
 
-    lua.globals().set("ic", ic)
+    lua.globals().set("ic", ic)?;
+    lua.load(SCENE_RUNTIME).set_name("=ic-scene").exec()
 }
 
 fn install_embedded_searcher(lua: &Lua, files: Rc<HashMap<String, Vec<u8>>>) -> mlua::Result<()> {
@@ -302,7 +314,11 @@ fn install_embedded_searcher(lua: &Lua, files: Rc<HashMap<String, Vec<u8>>>) -> 
     insert.call::<()>((searchers, 2, searcher))
 }
 
-const API: [&str; 20] = [
+const API: [&str; 24] = [
+    "node",
+    "world",
+    "scene_load",
+    "scene_unload",
     "rect",
     "image",
     "image_size",
@@ -499,7 +515,19 @@ impl LuaGame {
             eprintln!("[IC] {w}");
         }
         let atlas_data = Rc::new(built.data);
-        register_api(&lua, &shared, &atlas_data).map_err(|e| e.to_string())?;
+        let root = dir.to_path_buf();
+        let reader: Reader = Rc::new(move |p: &str| {
+            let rel = Path::new(p);
+            if rel.is_absolute()
+                || rel
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return None;
+            }
+            std::fs::read_to_string(root.join(rel)).ok()
+        });
+        register_api(&lua, &shared, &atlas_data, reader).map_err(|e| e.to_string())?;
 
         let dir = script
             .parent()
@@ -552,8 +580,15 @@ impl LuaGame {
             eprintln!("[IC] {w}");
         }
         let atlas_data = Rc::new(built.data);
-        register_api(&lua, &shared, &atlas_data).map_err(|e| e.to_string())?;
-        install_embedded_searcher(&lua, Rc::new(files)).map_err(|e| e.to_string())?;
+        let files = Rc::new(files);
+        let embedded = files.clone();
+        let reader: Reader = Rc::new(move |p: &str| {
+            embedded
+                .get(p)
+                .map(|b| String::from_utf8_lossy(b).into_owned())
+        });
+        register_api(&lua, &shared, &atlas_data, reader).map_err(|e| e.to_string())?;
+        install_embedded_searcher(&lua, files).map_err(|e| e.to_string())?;
         lua.load(main.as_slice())
             .set_name("@main.lua")
             .exec()
@@ -612,15 +647,33 @@ impl LuaGame {
         let Ok(ic) = self.lua.globals().get::<Table>("ic") else {
             return;
         };
-        let Ok(f) = ic.get::<Function>(name) else {
-            return;
+        // Сцена: загрузка, физика и рисование идут до кода игры
+        let hook = match name {
+            "load" => "_scene_boot",
+            "fixed_update" => "_scene_fixed",
+            "update" => "_scene_draw",
+            _ => "",
         };
+        let hook_fn = ic.get::<Function>(hook).ok();
+        let f = ic.get::<Function>(name).ok();
+        if hook_fn.is_none() && f.is_none() {
+            return;
+        }
 
         self.sync_in(ctx);
-        let res = match dt {
+        let run = |f: &Function| match dt {
             Some(d) => f.call::<()>(d),
             None => f.call::<()>(()),
         };
+        let mut res = Ok(());
+        if let Some(h) = &hook_fn {
+            res = run(h);
+        }
+        if res.is_ok() {
+            if let Some(f) = &f {
+                res = run(f);
+            }
+        }
         self.sync_out(ctx);
 
         if let Err(e) = res {
@@ -652,6 +705,65 @@ impl Game for LuaGame {
 mod tests {
     use super::*;
     use ic_core::Engine;
+
+    fn scene_game(main: &str, scene: &str) -> Engine<LuaGame> {
+        let mut files = HashMap::new();
+        files.insert("main.lua".to_string(), main.as_bytes().to_vec());
+        files.insert("main.ic".to_string(), scene.as_bytes().to_vec());
+        let game = LuaGame::from_files(files).unwrap();
+        let mut e = Engine::new(game, 60);
+        e.start();
+        e
+    }
+
+    const SCENE: &str = "ic-scene|5\n\
+node|ColorRect|Floor|0|-100|400|20|255|255|255|0|255|1|0||0|24||900|0\n\
+node|Body|Ball|0|50|20|20|255|0|0|0|255|1|0||0|24||900|0\n\
+node|ColorRect|Parent|100|0|40|40|0|255|0|0|255|1|0||0|24||900|0\n\
+node|Label|Kid|10|5|10|10|0|0|255|0|255|1|0||Hi|24|Parent|900|0\n\
+node|FPS|Counter|-200|200|10|10|255|255|255|0|255|1|0||0|24||900|0\n";
+
+    #[test]
+    fn main_scene_loads_and_draws_without_lua_code() {
+        let mut e = scene_game("", SCENE);
+        for _ in 0..3 {
+            e.frame();
+        }
+        assert!(e.ctx.draw.sprites.len() >= 3);
+    }
+
+    #[test]
+    fn body_falls_and_rests_on_solid() {
+        let scene = SCENE.replace("ColorRect|Floor", "Solid|Floor");
+        let mut e = scene_game("", &scene);
+        e.frame();
+        {
+            let ic: mlua::Table = e.game.lua.globals().get("ic").unwrap();
+            let step: mlua::Function = ic.get("_scene_fixed").unwrap();
+            for _ in 0..300 {
+                step.call::<()>(1.0_f32 / 60.0).unwrap();
+            }
+        }
+        let ball_y: f32 = {
+            let ic: mlua::Table = e.game.lua.globals().get("ic").unwrap();
+            let f: mlua::Function = ic.get("node").unwrap();
+            let ball: mlua::Table = f.call("Ball").unwrap();
+            ball.get("y").unwrap()
+        };
+        assert!(ball_y < 50.0 && ball_y > -100.0, "y = {ball_y}");
+    }
+
+    #[test]
+    fn child_follows_parent_position() {
+        let mut e = scene_game("", SCENE);
+        e.frame();
+        let ic: mlua::Table = e.game.lua.globals().get("ic").unwrap();
+        let node: mlua::Function = ic.get("node").unwrap();
+        let world: mlua::Function = ic.get("world").unwrap();
+        let kid: mlua::Table = node.call("Kid").unwrap();
+        let (x, y): (f32, f32) = world.call(kid).unwrap();
+        assert_eq!((x, y), (110.0, 5.0));
+    }
 
     #[test]
     fn lua_draws_and_quits() {
